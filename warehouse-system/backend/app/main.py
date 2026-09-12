@@ -1,0 +1,80 @@
+import logging
+import time
+from datetime import datetime, timezone
+from typing import Any
+from uuid import uuid4
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.exceptions import HTTPException
+
+from app.config import get_settings
+from app.database import engine
+
+settings = get_settings()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
+logger = logging.getLogger('warehouse')
+app = FastAPI(title=settings.app_name, version='0.1.0', description='第一阶段：项目基础、MySQL 与数据库迁移。业务写入接口将在后续阶段实现。')
+app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True,
+                   allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Content-Type', 'Authorization', 'X-Request-ID'])
+
+
+class Envelope(BaseModel):
+    code: str = 'OK'
+    message: str = '成功'
+    data: Any = None
+
+
+def error(status: int, code: str, message: str):
+    return JSONResponse(status_code=status, content={'code': code, 'message': message, 'data': None})
+
+
+@app.middleware('http')
+async def request_log(request: Request, call_next):
+    request_id = str(uuid4())
+    started = time.perf_counter()
+    response = await call_next(request)
+    response.headers['X-Request-ID'] = request_id
+    logger.info('%s %s %s %.1fms request_id=%s', request.method, request.url.path,
+                response.status_code, (time.perf_counter() - started) * 1000, request_id)
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, exc):
+    return error(422, 'VALIDATION_ERROR', '参数格式不正确，请检查输入')
+
+
+@app.exception_handler(HTTPException)
+async def http_error(request, exc):
+    return error(exc.status_code, 'HTTP_ERROR', str(exc.detail))
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request, exc):
+    # 不将 SQL、连接信息或用户输入写入响应/日志。
+    logger.error('Unhandled error type=%s path=%s', type(exc).__name__, request.url.path)
+    return error(500, 'INTERNAL_ERROR', '服务暂时不可用，请稍后重试')
+
+
+@app.get('/api/health', response_model=Envelope, tags=['系统状态'])
+def health():
+    return Envelope(data={'status': 'ok', 'version': '0.1.0', 'phase': 1,
+                          'time': datetime.now(timezone.utc).isoformat(), 'timezone': settings.business_timezone})
+
+
+@app.get('/api/health/db', response_model=Envelope, responses={503: {'model': Envelope}}, tags=['系统状态'])
+def database_health():
+    try:
+        with engine.connect() as connection:
+            version = connection.execute(text('SELECT VERSION()')).scalar_one()
+            revision = connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
+        return Envelope(data={'status': 'ok', 'engine': 'MySQL', 'version': version, 'migration': revision})
+    except SQLAlchemyError as exc:
+        logger.warning('Database readiness failed type=%s', type(exc).__name__)
+        return error(503, 'DATABASE_NOT_READY', '数据库连接或迁移尚未就绪，请检查配置并运行迁移')

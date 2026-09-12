@@ -1,0 +1,43 @@
+<script setup>
+import { onMounted, ref } from 'vue'
+import { api } from '../api'
+
+const loading = ref(false)
+const backend = ref(null)
+const database = ref(null)
+const failures = ref([])
+const checkedAt = ref('尚未检查')
+async function refresh() {
+  loading.value = true
+  failures.value = []
+  backend.value = null
+  database.value = null
+  const results = await Promise.allSettled([api.get('/health'), api.get('/health/db')])
+  if (results[0].status === 'fulfilled') backend.value = results[0].value.data
+  else failures.value.push(results[0].reason.message)
+  if (results[1].status === 'fulfilled') database.value = results[1].value.data
+  else failures.value.push(results[1].reason.message)
+  checkedAt.value = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
+  loading.value = false
+}
+const metrics = ['原材料种类', '成品种类', '当前生产单', '今日入库', '今日出库', '临期批次', '过期批次', '库存不足']
+onMounted(refresh)
+</script>
+
+<template>
+  <div class="page-heading"><div><h1>仓库工作台</h1><p>库存清楚，生产有据。仓库与车间的日常工作从这里开始。</p></div><el-button :loading="loading" @click="refresh">刷新连接状态</el-button></div>
+  <el-alert title="基础环境搭建阶段" description="当前可验证前后端连接和数据库迁移。业务功能按后续阶段开放，下方统计尚未接入业务数据。" type="info" show-icon :closable="false" />
+  <div class="status-grid">
+    <el-card shadow="never"><div class="card-label">API 服务 <el-tag :type="backend ? 'success' : 'warning'">{{ loading ? '检查中' : backend ? '运行正常' : '未连接' }}</el-tag></div><h2>FastAPI <small>{{ backend?.version || '—' }}</small></h2><p>统一接口 · UTC 时间 · Swagger 文档</p></el-card>
+    <el-card shadow="never"><div class="card-label">数据库 <el-tag :type="database ? 'success' : 'warning'">{{ loading ? '检查中' : database ? '连接正常' : '待检查' }}</el-tag></div><h2>MySQL <small>{{ database?.version || '—' }}</small></h2><p>迁移版本：{{ database?.migration || '尚未验证' }}</p></el-card>
+    <el-card shadow="never"><div class="card-label">开发进度 <el-tag type="info">1 / 9 阶段</el-tag></div><h2>项目基础</h2><p>下一阶段：用户、原材料、成品及基础资料</p></el-card>
+  </div>
+  <el-alert v-for="message in failures" :key="message" :title="message" type="error" show-icon :closable="false" class="error-alert" />
+  <div class="section-heading"><h3>业务概览</h3><span>业务数据接入后显示</span></div>
+  <div class="metrics"><el-card v-for="label in metrics" :key="label" shadow="never"><div class="metric-label">{{ label }}</div><div class="metric-value">—</div><small>待接入</small></el-card></div>
+  <div class="recent-grid">
+    <el-card shadow="never"><template #header><strong>最近库存流水</strong></template><el-empty :image-size="70" description="库存业务将在第三阶段开放" /></el-card>
+    <el-card shadow="never"><template #header><strong>最近生产单</strong></template><el-empty :image-size="70" description="生产单将在第六阶段开放" /></el-card>
+  </div>
+  <div class="page-footer"><span>最后检查：{{ checkedAt }}（北京时间）</span><a href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener">打开 API 文档 ↗</a></div>
+</template>
