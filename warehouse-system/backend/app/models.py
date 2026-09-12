@@ -40,6 +40,9 @@ class User(Identity, Timestamps, Archive, Base):
     display_name: Mapped[str] = mapped_column(String(80))
     password_hash: Mapped[str] = mapped_column(String(255))
     role_id: Mapped[int] = mapped_column(ForeignKey('roles.id'), index=True)
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class Unit(Base):

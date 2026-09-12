@@ -1,6 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Dashboard from './views/Dashboard.vue'
 import ModulePlaceholder from './views/ModulePlaceholder.vue'
+import Catalog from './views/Catalog.vue'
+import Users from './views/Users.vue'
+import Login from './views/Login.vue'
+import { auth, restoreAuth } from './auth'
 
 export const menuGroups = [
   { label: '原材料管理', items: [['materials', '原材料档案'], ['material-receipts', '原材料入库'], ['material-outbounds', '原材料出库'], ['material-stock', '原材料库存'], ['batches', '批次库存']] },
@@ -10,13 +14,24 @@ export const menuGroups = [
   { label: '系统管理', items: [['users', '用户管理'], ['suppliers', '供应商'], ['locations', '库位'], ['settings', '基础设置'], ['logs', '操作日志']] },
 ]
 
-export default createRouter({
+const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', component: Login, meta: { title: '登录', public: true } },
     { path: '/', component: Dashboard, meta: { title: '首页' } },
     ...menuGroups.flatMap(group => group.items.map(([path, label]) => ({
-      path: `/${path}`, component: ModulePlaceholder, meta: { title: label, group: group.label },
+      path: `/${path}`, component: path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : ModulePlaceholder,
+      meta: { title: label, group: group.label, resource: path, admin: ['users', 'settings', 'logs'].includes(path) },
     }))),
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
+router.beforeEach(async to => {
+  if (to.meta.public) return true
+  try {
+    if (!await restoreAuth()) return { path: '/login', query: { redirect: to.fullPath } }
+    if (to.meta.admin && auth.user.role !== 'admin') return '/'
+  } catch { return { path: '/login', query: { redirect: to.fullPath } } }
+})
+window.addEventListener('wms-auth-expired', () => { if (router.currentRoute.value.path !== '/login') router.replace('/login') })
+export default router

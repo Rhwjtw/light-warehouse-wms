@@ -1,5 +1,6 @@
 param([string]$NodePath = '')
 $ErrorActionPreference = 'Stop'
+$env:PYTHONUTF8 = '1'
 $projectRoot = $PSScriptRoot
 $runtimeDir = Join-Path $projectRoot '.runtime'
 $backendDir = Join-Path $projectRoot 'backend'

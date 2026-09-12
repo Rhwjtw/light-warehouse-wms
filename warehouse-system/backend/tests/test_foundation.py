@@ -40,7 +40,7 @@ def test_mysql_schema_and_health():
     inspector = inspect(engine)
     assert set(Base.metadata.tables).issubset(set(inspector.get_table_names()))
     with engine.connect() as connection:
-        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '0002'
+        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '0003'
         assert connection.execute(text('SELECT @@session.time_zone')).scalar_one() == '+00:00'
         assert connection.execute(text("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND engine <> 'InnoDB'")).scalar_one() == 0
     with TestClient(app) as client:

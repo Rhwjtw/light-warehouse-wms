@@ -1,33 +1,36 @@
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from starlette.exceptions import HTTPException
 
 from app.config import get_settings
 from app.database import engine
+from app.schemas import Envelope
+from app import auth, catalog, users
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from app.config import BACKEND_DIR
 
 settings = get_settings()
+expected_revision = ScriptDirectory.from_config(Config(str(BACKEND_DIR / 'alembic.ini'))).get_current_head()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
 logger = logging.getLogger('warehouse')
-app = FastAPI(title=settings.app_name, version='0.1.0', description='第一阶段：项目基础、MySQL 与数据库迁移。业务写入接口将在后续阶段实现。')
+app = FastAPI(title=settings.app_name, version='0.2.0', description='第二阶段：身份认证、用户管理及原材料、成品、供应商、库位基础资料。库存业务尚未开放。')
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True,
                    allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Content-Type', 'Authorization', 'X-Request-ID'])
 
 
-class Envelope(BaseModel):
-    code: str = 'OK'
-    message: str = '成功'
-    data: Any = None
+app.include_router(auth.router)
+app.include_router(catalog.router)
+app.include_router(users.router)
 
 
 def error(status: int, code: str, message: str):
@@ -55,6 +58,11 @@ async def http_error(request, exc):
     return error(exc.status_code, 'HTTP_ERROR', str(exc.detail))
 
 
+@app.exception_handler(IntegrityError)
+async def integrity_error(request, exc):
+    return error(409, 'DATA_CONFLICT', '编码或用户名已使用（包含已删除记录），或数据存在引用冲突')
+
+
 @app.exception_handler(Exception)
 async def unexpected_error(request, exc):
     # 不将 SQL、连接信息或用户输入写入响应/日志。
@@ -64,7 +72,7 @@ async def unexpected_error(request, exc):
 
 @app.get('/api/health', response_model=Envelope, tags=['系统状态'])
 def health():
-    return Envelope(data={'status': 'ok', 'version': '0.1.0', 'phase': 1,
+    return Envelope(data={'status': 'ok', 'version': '0.2.0', 'phase': 2,
                           'time': datetime.now(timezone.utc).isoformat(), 'timezone': settings.business_timezone})
 
 
@@ -74,6 +82,8 @@ def database_health():
         with engine.connect() as connection:
             version = connection.execute(text('SELECT VERSION()')).scalar_one()
             revision = connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
+        if revision != expected_revision:
+            return error(503, 'MIGRATION_REQUIRED', '数据库版本落后，请先运行 Alembic 迁移')
         return Envelope(data={'status': 'ok', 'engine': 'MySQL', 'version': version, 'migration': revision})
     except SQLAlchemyError as exc:
         logger.warning('Database readiness failed type=%s', type(exc).__name__)

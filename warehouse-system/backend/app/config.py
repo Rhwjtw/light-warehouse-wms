@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ['http://127.0.0.1:5173', 'http://localhost:5173']
     business_timezone: str = 'Asia/Shanghai'
     auth_secret: SecretStr = SecretStr('')
+    auth_token_hours: int = Field(default=8, ge=1, le=24)
 
     @field_validator('business_timezone')
     @classmethod
