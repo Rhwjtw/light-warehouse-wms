@@ -173,6 +173,7 @@ class StockDocument(Identity, Base):
     __tablename__ = 'stock_documents'
     document_no: Mapped[str] = mapped_column(String(48), unique=True)
     request_id: Mapped[str] = mapped_column(String(64), unique=True)
+    request_hash: Mapped[str | None] = mapped_column(String(64))
     kind: Mapped[str] = mapped_column(String(32), index=True)
     operator_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)

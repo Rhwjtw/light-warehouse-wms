@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $statePath = Join-Path $PSScriptRoot '.runtime/processes.json'
 if (-not (Test-Path -LiteralPath $statePath)) { Write-Host '没有本脚本启动的进程记录。'; exit }
 $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json

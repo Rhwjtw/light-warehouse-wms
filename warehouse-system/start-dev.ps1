@@ -1,4 +1,4 @@
-param([string]$NodePath = '')
+﻿param([string]$NodePath = '')
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $projectRoot = $PSScriptRoot

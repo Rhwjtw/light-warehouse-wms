@@ -4,10 +4,11 @@ import ModulePlaceholder from './views/ModulePlaceholder.vue'
 import Catalog from './views/Catalog.vue'
 import Users from './views/Users.vue'
 import Login from './views/Login.vue'
+import MaterialInventory from './views/MaterialInventory.vue'
 import { auth, restoreAuth } from './auth'
 
 export const menuGroups = [
-  { label: '原材料管理', items: [['materials', '原材料档案'], ['material-receipts', '原材料入库'], ['material-outbounds', '原材料出库'], ['material-stock', '原材料库存'], ['batches', '批次库存']] },
+  { label: '原材料管理', items: [['materials', '原材料档案'], ['material-receipts', '原材料入库'], ['material-outbounds', '原材料出库'], ['material-stock', '原材料库存'], ['batches', '批次库存'], ['material-transactions', '库存流水']] },
   { label: '成品管理', items: [['products', '成品档案'], ['finished-receipts', '成品入库'], ['finished-outbounds', '成品出库'], ['finished-stock', '成品库存']] },
   { label: '生产管理', items: [['boms', 'BOM 配方'], ['orders', '生产单'], ['issues', '车间领料'], ['supplements', '车间补料'], ['returns', '车间退料'], ['losses', '损耗统计']] },
   { label: '预警中心', items: [['expiry', '有效期预警']] },
@@ -20,7 +21,7 @@ const router = createRouter({
     { path: '/login', component: Login, meta: { title: '登录', public: true } },
     { path: '/', component: Dashboard, meta: { title: '首页' } },
     ...menuGroups.flatMap(group => group.items.map(([path, label]) => ({
-      path: `/${path}`, component: path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : ModulePlaceholder,
+      path: `/${path}`, component: ['material-receipts','material-outbounds','material-stock','batches','material-transactions'].includes(path) ? MaterialInventory : path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : ModulePlaceholder,
       meta: { title: label, group: group.label, resource: path, admin: ['users', 'settings', 'logs'].includes(path) },
     }))),
     { path: '/:pathMatch(.*)*', redirect: '/' },

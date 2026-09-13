@@ -20,7 +20,7 @@ const groups = computed(() => menuGroups.map(group => ({ ...group, items: group.
           <el-menu-item v-for="[path, label] in group.items" :key="path" :index="`/${path}`">{{ label }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
-      <div class="sidebar-footer">v0.2.0 · 本地开发版</div>
+      <div class="sidebar-footer">v0.3.0 · 本地开发版</div>
     </el-aside>
     <el-container>
       <el-header class="topbar">

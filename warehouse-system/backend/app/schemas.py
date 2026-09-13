@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import date
 from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
@@ -78,3 +79,28 @@ class PasswordChange(InputModel):
 
 class PasswordReset(InputModel):
     new_password: Password
+
+
+PositiveQuantity = Annotated[Decimal, BeforeValidator(exact_decimal), Field(gt=0, le=Decimal('99999999999999.999999'), max_digits=20, decimal_places=6)]
+
+
+class MaterialOutboundInput(InputModel):
+    request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
+    material_id: int = Field(gt=0)
+    batch_id: int = Field(gt=0)
+    quantity: PositiveQuantity
+    unit: str = Field(min_length=1, max_length=16)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class MaterialReceiptInput(InputModel):
+    request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
+    material_id: int = Field(gt=0)
+    batch_no: Annotated[str, StringConstraints(min_length=1, max_length=80)]
+    quantity: PositiveQuantity
+    unit: str = Field(min_length=1, max_length=16)
+    production_date: date
+    expiry_date: date
+    supplier_id: int = Field(gt=0)
+    location_id: int = Field(gt=0)
+    notes: str | None = Field(default=None, max_length=2000)
