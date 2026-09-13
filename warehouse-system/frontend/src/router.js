@@ -5,6 +5,7 @@ import Catalog from './views/Catalog.vue'
 import Users from './views/Users.vue'
 import Login from './views/Login.vue'
 import MaterialInventory from './views/MaterialInventory.vue'
+import FinishedInventory from './views/FinishedInventory.vue'
 import { auth, restoreAuth } from './auth'
 
 export const menuGroups = [
@@ -21,7 +22,7 @@ const router = createRouter({
     { path: '/login', component: Login, meta: { title: '登录', public: true } },
     { path: '/', component: Dashboard, meta: { title: '首页' } },
     ...menuGroups.flatMap(group => group.items.map(([path, label]) => ({
-      path: `/${path}`, component: ['material-receipts','material-outbounds','material-stock','batches','material-transactions'].includes(path) ? MaterialInventory : path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : ModulePlaceholder,
+      path: `/${path}`, component: ['finished-receipts','finished-outbounds','finished-stock'].includes(path) ? FinishedInventory : ['material-receipts','material-outbounds','material-stock','batches','material-transactions'].includes(path) ? MaterialInventory : path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : ModulePlaceholder,
       meta: { title: label, group: group.label, resource: path, admin: ['users', 'settings', 'logs'].includes(path) },
     }))),
     { path: '/:pathMatch(.*)*', redirect: '/' },

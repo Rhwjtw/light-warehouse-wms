@@ -174,11 +174,15 @@ class StockDocument(Identity, Base):
     document_no: Mapped[str] = mapped_column(String(48), unique=True)
     request_id: Mapped[str] = mapped_column(String(64), unique=True)
     request_hash: Mapped[str | None] = mapped_column(String(64))
+    business_date: Mapped[date | None] = mapped_column(Date)
+    business_type: Mapped[str | None] = mapped_column(String(20))
+    reference_no: Mapped[str | None] = mapped_column(String(120))
     kind: Mapped[str] = mapped_column(String(32), index=True)
     operator_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
-    __table_args__ = (CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound')", name='valid_kind'),)
+    __table_args__ = (CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound')", name='valid_kind'),
+                     CheckConstraint("business_type IS NULL OR business_type IN ('normal','production')", name='valid_business_type'))
 
 
 class MaterialMovement(Identity, Base):
@@ -224,12 +228,18 @@ class FinishedBatch(Identity, Timestamps, Base):
     __tablename__ = 'finished_batches'
     product_id: Mapped[int] = mapped_column(ForeignKey('finished_products.id'), index=True)
     batch_no: Mapped[str] = mapped_column(String(80))
-    location_id: Mapped[int] = mapped_column(ForeignKey('locations.id'))
+    location_id: Mapped[int | None] = mapped_column(ForeignKey('locations.id'))
+    # NULL 保留原批次结构；aggregate 为当前每成品唯一的汇总库存，页面不暴露内部批号。
+    stock_scope: Mapped[str | None] = mapped_column(String(16))
     unit: Mapped[str] = mapped_column(ForeignKey('units.code'))
     remaining_quantity: Mapped[Decimal] = mapped_column(QTY)
     production_date: Mapped[date | None] = mapped_column(Date)
     expiry_date: Mapped[date | None] = mapped_column(Date)
     __table_args__ = (UniqueConstraint('product_id', 'batch_no', 'location_id'),
+                     UniqueConstraint('product_id', 'stock_scope', name='uq_finished_batches_product_scope'),
+                     CheckConstraint("(stock_scope IS NULL AND location_id IS NOT NULL) OR "
+                                     "(stock_scope IS NOT NULL AND stock_scope = 'aggregate' AND location_id IS NULL AND batch_no = '__aggregate__' "
+                                     "AND production_date IS NULL AND expiry_date IS NULL)", name='valid_scope'),
                      CheckConstraint('remaining_quantity >= 0', name='nonnegative_stock'),
                      CheckConstraint('expiry_date IS NULL OR production_date IS NULL OR expiry_date >= production_date', name='valid_dates'))
 

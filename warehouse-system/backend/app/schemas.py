@@ -1,6 +1,6 @@
 from decimal import Decimal
 from datetime import date
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
@@ -103,4 +103,15 @@ class MaterialReceiptInput(InputModel):
     expiry_date: date
     supplier_id: int = Field(gt=0)
     location_id: int = Field(gt=0)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class FinishedStockInput(InputModel):
+    request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
+    product_id: int = Field(gt=0)
+    quantity: PositiveQuantity
+    unit: str = Field(min_length=1, max_length=16)
+    business_date: date = Field(ge=date(1000, 1, 1))
+    business_type: Literal['normal', 'production'] = 'normal'
+    reference_no: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
