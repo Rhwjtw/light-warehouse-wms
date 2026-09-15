@@ -5,7 +5,7 @@ import { computed } from 'vue'
 import { auth } from './auth'
 import AccountBar from './components/AccountBar.vue'
 const route = useRoute()
-const groups = computed(() => menuGroups.map(group => ({ ...group, items: group.items.filter(([path]) => auth.user?.role === 'admin' || !['users', 'settings', 'logs', 'boms'].includes(path)) })).filter(group => group.items.length))
+const groups = computed(() => menuGroups.map(group => ({ ...group, items: group.items.filter(([path]) => auth.user?.role === 'admin' || !['users', 'settings', 'logs'].includes(path)) })).filter(group => group.items.length))
 </script>
 
 <template>
@@ -20,7 +20,7 @@ const groups = computed(() => menuGroups.map(group => ({ ...group, items: group.
           <el-menu-item v-for="[path, label] in group.items" :key="path" :index="`/${path}`">{{ label }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
-      <div class="sidebar-footer">v0.4.0 · 本地开发版</div>
+      <div class="sidebar-footer">v0.5.0 · 本地开发版</div>
     </el-aside>
     <el-container>
       <el-header class="topbar">

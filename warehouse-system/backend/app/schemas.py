@@ -115,3 +115,24 @@ class FinishedStockInput(InputModel):
     business_type: Literal['normal', 'production'] = 'normal'
     reference_no: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class BomItemInput(InputModel):
+    material_id: int = Field(gt=0)
+    quantity_per_unit: PositiveQuantity
+    unit: str = Field(min_length=1, max_length=16)
+    sort_order: int = Field(default=0, ge=0, le=1000000)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class BomInput(InputModel):
+    product_id: int = Field(gt=0)
+    version: int = Field(default=1, gt=0, le=2147483647)
+    status: Literal['draft', 'active', 'inactive'] = 'draft'
+    notes: str | None = Field(default=None, max_length=2000)
+    items: list[BomItemInput] = Field(min_length=1, max_length=500)
+
+
+class BomCalculateInput(InputModel):
+    finished_product_id: int = Field(gt=0)
+    planned_quantity: PositiveQuantity

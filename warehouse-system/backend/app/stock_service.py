@@ -2,7 +2,7 @@
 import hashlib
 import json
 from datetime import datetime
-from decimal import Decimal, localcontext
+from decimal import Decimal
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -12,26 +12,12 @@ from sqlalchemy.exc import IntegrityError
 
 from app.auth import audit
 from app.config import get_settings
-from app.models import (RawMaterial, Supplier, Location, Unit, Role, MaterialBatch,
+from app.models import (RawMaterial, Supplier, Location, Role, MaterialBatch,
                         StockDocument, MaterialMovement, InventoryTransaction)
-
-MAX_QUANTITY = Decimal('99999999999999.999999')
-
+from app.unit_conversion import MAX_QUANTITY, convert_quantity
 
 def business_today():
     return datetime.now(ZoneInfo(get_settings().business_timezone)).date()
-
-
-def convert_quantity(session, quantity, source, target):
-    source_unit, target_unit = session.get(Unit, source), session.get(Unit, target)
-    if not source_unit or not target_unit or source_unit.dimension != target_unit.dimension:
-        raise HTTPException(422, '单位不支持或无法跨维度换算')
-    with localcontext() as ctx:
-        ctx.prec = 60
-        result = quantity * source_unit.factor / target_unit.factor
-        if result <= 0 or result > MAX_QUANTITY or result != result.quantize(Decimal('0.000001')):
-            raise HTTPException(422, '换算后数量超出范围或超过六位小数')
-    return result
 
 
 def active_record(session, model, identity):

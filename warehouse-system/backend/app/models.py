@@ -2,7 +2,7 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, Date, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Computed, Date, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base, UTCDateTime
@@ -121,17 +121,24 @@ class BomHeader(Identity, Timestamps, Archive, Base):
     status: Mapped[str] = mapped_column(String(20), default='draft')
     output_unit: Mapped[str] = mapped_column(ForeignKey('units.code'))
     notes: Mapped[str | None] = mapped_column(Text)
+    # MySQL 唯一索引允许多个 NULL；生成列只在 active 时取成品 ID，数据库层保证并发启用也不会出现双 ACTIVE。
+    active_product_id: Mapped[int | None] = mapped_column(
+        Integer, Computed("CASE WHEN status = 'active' THEN product_id ELSE NULL END", persisted=True)
+    )
     __table_args__ = (UniqueConstraint('product_id', 'version'),
+                     UniqueConstraint('active_product_id', name='uq_bom_headers_active_product'),
                      CheckConstraint('version > 0', name='positive_version'),
-                     CheckConstraint("status IN ('draft','active','archived')", name='valid_status'))
+                     CheckConstraint("status IN ('draft','active','inactive','archived')", name='valid_status'))
 
 
-class BomItem(Identity, Base):
+class BomItem(Identity, Timestamps, Base):
     __tablename__ = 'bom_items'
     bom_id: Mapped[int] = mapped_column(ForeignKey('bom_headers.id'), index=True)
     material_id: Mapped[int] = mapped_column(ForeignKey('raw_materials.id'), index=True)
     quantity_per_unit: Mapped[Decimal] = mapped_column(QTY)
     unit: Mapped[str] = mapped_column(ForeignKey('units.code'))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[str | None] = mapped_column(Text)
     __table_args__ = (UniqueConstraint('bom_id', 'material_id'), CheckConstraint('quantity_per_unit > 0', name='positive_quantity'))
 
 
