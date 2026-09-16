@@ -146,32 +146,44 @@ class ProductionOrder(Identity, Timestamps, Base):
     __tablename__ = 'production_orders'
     order_no: Mapped[str] = mapped_column(String(48), unique=True)
     product_id: Mapped[int] = mapped_column(ForeignKey('finished_products.id'), index=True)
+    product_name_snapshot: Mapped[str] = mapped_column(String(120))
     bom_id: Mapped[int] = mapped_column(ForeignKey('bom_headers.id'))
+    bom_version: Mapped[int] = mapped_column(Integer)
     planned_quantity: Mapped[Decimal] = mapped_column(QTY)
     actual_quantity: Mapped[Decimal | None] = mapped_column(QTY)
     unit: Mapped[str] = mapped_column(ForeignKey('units.code'))
-    status: Mapped[str] = mapped_column(String(20), default='draft', index=True)
+    status: Mapped[str] = mapped_column(String(20), default='ready', index=True)
+    planned_date: Mapped[date | None] = mapped_column(Date)
     created_by: Mapped[int] = mapped_column(ForeignKey('users.id'))
     completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     __table_args__ = (
         CheckConstraint('planned_quantity > 0 AND (actual_quantity IS NULL OR actual_quantity >= 0)', name='valid_quantities'),
-        CheckConstraint("status IN ('draft','released','in_progress','completed','received','cancelled')", name='valid_status'),
+        CheckConstraint("status IN ('draft','ready','in_progress','completed','received','cancelled')", name='valid_status'),
     )
 
 
-class ProductionOrderMaterial(Identity, Base):
+class ProductionOrderMaterial(Identity, Timestamps, Base):
     __tablename__ = 'production_order_materials'
     production_order_id: Mapped[int] = mapped_column(ForeignKey('production_orders.id'), index=True)
     material_id: Mapped[int] = mapped_column(ForeignKey('raw_materials.id'), index=True)
-    # 快照已转换为原料库存单位；以后更改 BOM 不影响历史单据。
+    material_code_snapshot: Mapped[str] = mapped_column(String(40))
+    material_name_snapshot: Mapped[str] = mapped_column(String(120))
+    # 单位用量保留 BOM 原单位；计划理论量及领补退汇总统一为原料库存单位。
     quantity_per_unit: Mapped[Decimal] = mapped_column(QTY)
     unit: Mapped[str] = mapped_column(ForeignKey('units.code'))
     planned_theoretical_quantity: Mapped[Decimal] = mapped_column(QTY)
+    base_unit: Mapped[str] = mapped_column(ForeignKey('units.code'))
+    issued_quantity: Mapped[Decimal] = mapped_column(QTY, default=Decimal('0'))
+    supplemented_quantity: Mapped[Decimal] = mapped_column(QTY, default=Decimal('0'))
+    returned_quantity: Mapped[Decimal] = mapped_column(QTY, default=Decimal('0'))
     final_theoretical_quantity: Mapped[Decimal | None] = mapped_column(QTY)
     __table_args__ = (
         UniqueConstraint('production_order_id', 'material_id'),
-        CheckConstraint('quantity_per_unit > 0 AND planned_theoretical_quantity > 0 AND (final_theoretical_quantity IS NULL OR final_theoretical_quantity >= 0)', name='valid_quantities'),
+        CheckConstraint('quantity_per_unit > 0 AND planned_theoretical_quantity > 0 '
+                        'AND issued_quantity >= 0 AND supplemented_quantity >= 0 AND returned_quantity >= 0 '
+                        'AND returned_quantity <= issued_quantity + supplemented_quantity '
+                        'AND (final_theoretical_quantity IS NULL OR final_theoretical_quantity >= 0)', name='valid_quantities'),
     )
 
 

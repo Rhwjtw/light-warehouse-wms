@@ -136,3 +136,28 @@ class BomInput(InputModel):
 class BomCalculateInput(InputModel):
     finished_product_id: int = Field(gt=0)
     planned_quantity: PositiveQuantity
+
+
+class ProductionOrderCreateInput(InputModel):
+    finished_product_id: int = Field(gt=0)
+    planned_quantity: PositiveQuantity
+    planned_date: date | None = Field(default=None, ge=date(1000, 1, 1))
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class ProductionOrderUpdateInput(InputModel):
+    planned_date: date | None = Field(default=None, ge=date(1000, 1, 1))
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class ProductionAllocationInput(InputModel):
+    batch_id: int = Field(gt=0)
+    quantity: PositiveQuantity
+
+
+class ProductionMaterialPostingInput(InputModel):
+    request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
+    order_material_id: int = Field(gt=0)
+    unit: str = Field(min_length=1, max_length=16)
+    allocations: list[ProductionAllocationInput] = Field(min_length=1, max_length=100)
+    notes: str | None = Field(default=None, max_length=2000)

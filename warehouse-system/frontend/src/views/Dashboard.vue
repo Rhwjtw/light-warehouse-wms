@@ -32,18 +32,18 @@ onMounted(refresh)
 
 <template>
   <div class="page-heading"><div><h1>仓库工作台</h1><p>库存清楚，生产有据。仓库与车间的日常工作从这里开始。</p></div><el-button :loading="loading" @click="refresh">刷新连接状态</el-button></div>
-  <el-alert title="原材料与成品库存已开放" description="可以办理原料与成品普通入出库、查询库存与流水。BOM、生产业务与完整预警看板将在后续阶段开放。" type="info" show-icon :closable="false" />
+  <el-alert title="生产单与车间领补退已开放" description="可以保存 BOM 快照和计划理论需求，并按批次办理 FEFO 领料、补料与退料；完工入库和损耗在下一阶段开放。" type="info" show-icon :closable="false" />
   <div class="status-grid">
     <el-card shadow="never"><div class="card-label">API 服务 <el-tag :type="backend ? 'success' : 'warning'">{{ loading ? '检查中' : backend ? '运行正常' : '未连接' }}</el-tag></div><h2>FastAPI <small>{{ backend?.version || '—' }}</small></h2><p>统一接口 · UTC 时间 · Swagger 文档</p></el-card>
     <el-card shadow="never"><div class="card-label">数据库 <el-tag :type="database ? 'success' : 'warning'">{{ loading ? '检查中' : database ? '连接正常' : '待检查' }}</el-tag></div><h2>MySQL <small>{{ database?.version || '—' }}</small></h2><p>迁移版本：{{ database?.migration || '尚未验证' }}</p></el-card>
-    <el-card shadow="never"><div class="card-label">开发进度 <el-tag type="info">4 / 9 阶段</el-tag></div><h2>成品库存</h2><p>下一阶段：BOM 配方与版本管理</p></el-card>
+    <el-card shadow="never"><div class="card-label">开发进度 <el-tag type="info">6 / 9 阶段</el-tag></div><h2>生产领料</h2><p>下一阶段：实际产量、生产入库与损耗</p></el-card>
   </div>
   <el-alert v-for="message in failures" :key="message" :title="message" type="error" show-icon :closable="false" class="error-alert" />
   <div class="section-heading"><h3>业务概览</h3><span>库存与生产统计尚未开放</span></div>
   <div class="metrics"><el-card v-for="label in metrics" :key="label" shadow="never"><div class="metric-label">{{ label }}</div><div class="metric-value">{{ counts[label] ?? '—' }}</div><small>{{ counts[label] !== undefined ? '当前档案数量' : '待接入' }}</small></el-card></div>
   <div class="recent-grid">
     <el-card shadow="never"><template #header><strong>库存流水</strong></template><p>原材料流水已可查询，首页最近流水卡片将在完整看板阶段接入。</p><el-button @click="$router.push('/material-transactions')">查看原材料流水</el-button></el-card>
-    <el-card shadow="never"><template #header><strong>最近生产单</strong></template><el-empty :image-size="70" description="生产单将在第六阶段开放" /></el-card>
+    <el-card shadow="never"><template #header><strong>最近生产单</strong></template><el-empty :image-size="70" description="生产单已开放；首页卡片将在完整看板阶段接入" /></el-card>
   </div>
   <div class="page-footer"><span>最后检查：{{ checkedAt }}（北京时间）</span><a href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener">打开 API 文档 ↗</a></div>
 </template>

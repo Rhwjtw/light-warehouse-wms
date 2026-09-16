@@ -27,10 +27,10 @@ const columns = computed(() => resource.value === 'material-stock' ? [
 ] : [
   ['created_at', '记账时间'], ['document_no', '单据号'], ['material_name', '原料'], ['batch_no', '批号'], ['kind', '类型'],
   ['input_quantity', '输入数量'], ['input_unit', '输入单位'], ['before_quantity', '变动前'], ['change_quantity', '变动量'],
-  ['after_quantity', '变动后'], ['unit', '库存单位'], ['operator_name', '操作人'], ['notes', '备注'],
+  ['after_quantity', '变动后'], ['unit', '库存单位'], ['production_order_no', '生产单'], ['operator_name', '操作人'], ['notes', '备注'],
 ])
 function display(row, key) {
-  if (key === 'kind') return row[key] === 'material_receipt' ? '原料入库' : '原料出库'
+  if (key === 'kind') return ({ material_receipt: '原料入库', material_outbound: '原料出库', issue: '生产领料', supplement: '生产补料', return: '生产退料' })[row[key]] || row[key]
   if (key === 'created_at') return new Date(row[key]).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
   return row[key]
 }

@@ -1,12 +1,13 @@
 """原料库存只提供记账及只读查询，不开放余额编辑/删除。"""
 from fastapi import APIRouter, Query
-from sqlalchemy import select, func, or_
+from sqlalchemy import and_, select, func, or_
 
 from app.auth import SessionDep, UserDep
 from app.models import (RawMaterial, MaterialBatch, Supplier, Location, InventoryTransaction,
-                        StockDocument, User, MaterialMovement)
+                        StockDocument, User, MaterialMovement, MaterialIssueRecord,
+                        ProductionOrderMaterial, ProductionOrder)
 from app.schemas import Envelope, MaterialReceiptInput, MaterialOutboundInput
-from app.stock_service import post_material, business_today
+from app.stock_service import post_material, business_today, fefo_conditions, fefo_order
 
 router = APIRouter(prefix='/api', tags=['原材料库存'])
 
@@ -57,12 +58,7 @@ def batches(user: UserDep, session: SessionDep, q: str = Query('', max_length=12
 @router.get('/material-fefo', response_model=Envelope)
 def fefo(user: UserDep, session: SessionDep, material_id: int = Query(..., gt=0),
          page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
-    query = batch_query('', material_id).where(
-        MaterialBatch.remaining_quantity > 0, MaterialBatch.expiry_date >= business_today(),
-        MaterialBatch.unit == RawMaterial.unit, RawMaterial.is_active.is_(True), RawMaterial.deleted_at.is_(None),
-        Supplier.is_active.is_(True), Supplier.deleted_at.is_(None),
-        Location.is_active.is_(True), Location.deleted_at.is_(None)
-    ).order_by(MaterialBatch.expiry_date, MaterialBatch.received_at, MaterialBatch.id)
+    query = batch_query('', material_id).where(*fefo_conditions(material_id)).order_by(*fefo_order())
     return page_result(session, query, page, page_size)
 
 
@@ -81,20 +77,32 @@ def stock(user: UserDep, session: SessionDep, q: str = Query('', max_length=120)
 @router.get('/material-transactions', response_model=Envelope)
 def transactions(user: UserDep, session: SessionDep, q: str = Query('', max_length=120),
                  material_id: int | None = Query(None, gt=0), batch_id: int | None = Query(None, gt=0),
-                 kind: str | None = Query(None, pattern='^(material_receipt|material_outbound)$'),
+                 kind: str | None = Query(None, pattern='^(material_receipt|material_outbound|issue|supplement|return)$'),
                  page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     query = select(InventoryTransaction.id, InventoryTransaction.created_at, InventoryTransaction.kind,
                    MaterialBatch.material_id, RawMaterial.code.label('material_code'), RawMaterial.name.label('material_name'),
                    MaterialBatch.id.label('batch_id'), MaterialBatch.batch_no, InventoryTransaction.unit,
                    InventoryTransaction.before_quantity, InventoryTransaction.change_quantity, InventoryTransaction.after_quantity,
                    StockDocument.id.label('document_id'), StockDocument.document_no, User.display_name.label('operator_name'),
-                   InventoryTransaction.notes, MaterialMovement.input_quantity, MaterialMovement.input_unit)
+                   InventoryTransaction.notes,
+                   func.coalesce(MaterialMovement.input_quantity, MaterialIssueRecord.input_quantity).label('input_quantity'),
+                   func.coalesce(MaterialMovement.input_unit, MaterialIssueRecord.input_unit).label('input_unit'),
+                   ProductionOrder.id.label('production_order_id'), ProductionOrder.order_no.label('production_order_no'))
     query = query.select_from(InventoryTransaction).join(MaterialBatch, MaterialBatch.id == InventoryTransaction.material_batch_id)
     query = query.join(RawMaterial).join(StockDocument, StockDocument.id == InventoryTransaction.document_id)
-    query = query.join(User, User.id == InventoryTransaction.operator_id).join(MaterialMovement, MaterialMovement.document_id == StockDocument.id)
+    query = query.join(User, User.id == InventoryTransaction.operator_id)
+    query = query.outerjoin(MaterialMovement, and_(MaterialMovement.document_id == StockDocument.id,
+                                                    MaterialMovement.batch_id == MaterialBatch.id))
+    query = query.outerjoin(MaterialIssueRecord, and_(MaterialIssueRecord.document_id == StockDocument.id,
+                                                       MaterialIssueRecord.batch_id == MaterialBatch.id))
+    query = query.outerjoin(ProductionOrderMaterial,
+                            ProductionOrderMaterial.id == MaterialIssueRecord.order_material_id)
+    query = query.outerjoin(ProductionOrder,
+                            ProductionOrder.id == ProductionOrderMaterial.production_order_id)
     if q.strip():
         query = query.where(or_(*(column.contains(q.strip(), autoescape=True) for column in
-                                (RawMaterial.code, RawMaterial.name, MaterialBatch.batch_no, StockDocument.document_no))))
+                                (RawMaterial.code, RawMaterial.name, MaterialBatch.batch_no,
+                                 StockDocument.document_no, ProductionOrder.order_no))))
     if material_id:
         query = query.where(MaterialBatch.material_id == material_id)
     if batch_id:

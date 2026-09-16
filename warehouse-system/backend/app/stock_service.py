@@ -20,6 +20,23 @@ def business_today():
     return datetime.now(ZoneInfo(get_settings().business_timezone)).date()
 
 
+def fefo_conditions(material_id: int):
+    """唯一的 FEFO 可用批次口径；普通出库与生产领补料共同复用。"""
+    return (
+        MaterialBatch.material_id == material_id,
+        MaterialBatch.remaining_quantity > 0,
+        MaterialBatch.expiry_date >= business_today(),
+        MaterialBatch.unit == RawMaterial.unit,
+        RawMaterial.is_active.is_(True), RawMaterial.deleted_at.is_(None),
+        Supplier.is_active.is_(True), Supplier.deleted_at.is_(None),
+        Location.is_active.is_(True), Location.deleted_at.is_(None),
+    )
+
+
+def fefo_order():
+    return (MaterialBatch.expiry_date, MaterialBatch.received_at, MaterialBatch.id)
+
+
 def active_record(session, model, identity):
     record = session.scalar(select(model).where(model.id == identity).with_for_update())
     if record is None or not record.is_active or record.deleted_at:
