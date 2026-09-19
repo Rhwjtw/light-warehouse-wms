@@ -13,9 +13,20 @@ from app.production_service import (
 from app.schemas import (
     Envelope, ProductionMaterialPostingInput, ProductionOrderCreateInput,
     ProductionOrderUpdateInput,
+    ProductionCompleteInput,
 )
+from app.settlement_service import preview as settlement_preview, complete as complete_order
 
 router = APIRouter(prefix='/api/production-orders', tags=['生产单'])
+
+@router.post('/{identity}/settlement-preview', response_model=Envelope)
+def preview(identity: int, payload: ProductionCompleteInput, user: UserDep, session: SessionDep):
+    return Envelope(data=settlement_preview(session, user, identity, payload))
+
+
+@router.post('/{identity}/complete', response_model=Envelope)
+def complete(identity: int, payload: ProductionCompleteInput, user: UserDep, session: SessionDep):
+    return Envelope(data=complete_order(session, user, identity, payload))
 
 
 @router.get('', response_model=Envelope)

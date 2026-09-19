@@ -1,0 +1,87 @@
+"""Read-only preview and atomic completion using frozen BOM and actual material records."""
+from decimal import Decimal, localcontext, ROUND_HALF_UP
+
+from fastapi import HTTPException
+from sqlalchemy import select, func
+
+from app.auth import audit
+from app.finished_service import post_finished
+from app.models import MaterialIssueRecord, Role, utcnow
+from app.production_service import find_order, material_rows, material_data, order_data, decimal_text
+from app.schemas import FinishedStockInput
+from app.stock_service import business_today
+from app.unit_conversion import convert_quantity, MAX_QUANTITY
+
+
+def loss_values(theoretical, actual):
+    with localcontext() as context:
+        context.prec = 60
+        loss = actual - theoretical
+        rate = ((loss / theoretical * 100).quantize(Decimal('0.000000000001'), rounding=ROUND_HALF_UP)
+                if theoretical else None)
+    return loss, rate
+
+
+def prepare(session, user, identity, actual_quantity):
+    role = session.get(Role, user.role_id)
+    if role is None or role.code not in ('admin', 'warehouse'):
+        raise HTTPException(403, '仅管理员和仓库人员可以完成生产结算')
+    # 与领补退共用订单行锁；预览只持锁读取，不写数据库。
+    order = find_order(session, identity, lock=True)
+    if order.status in ('completed', 'received'):
+        raise HTTPException(409, '该生产单已完成，不能重复结算。')
+    if order.status not in ('ready', 'in_progress'):
+        raise HTTPException(409, '该生产单当前状态不能完成生产')
+    rows = material_rows(session, order.id)
+    if not rows:
+        raise HTTPException(409, '生产单缺少BOM快照，不能结算')
+    records = session.execute(select(MaterialIssueRecord.order_material_id, MaterialIssueRecord.kind,
+                                    func.sum(MaterialIssueRecord.quantity))
+                              .where(MaterialIssueRecord.order_material_id.in_([row.id for row in rows]))
+                              .group_by(MaterialIssueRecord.order_material_id, MaterialIssueRecord.kind)).all()
+    totals = {(identity, kind): quantity for identity, kind, quantity in records}
+    if not any(kind in ('issue', 'supplement') for _, kind in totals):
+        raise HTTPException(409, '生产单至少需要一次有效领料或补料记录')
+    results = []
+    for row in rows:
+        issued, supplemented, returned = (totals.get((row.id, kind), Decimal('0'))
+                                           for kind in ('issue', 'supplement', 'return'))
+        actual = issued + supplemented - returned
+        if actual < 0 or actual > MAX_QUANTITY:
+            raise HTTPException(409, '真实物料记录汇总异常，不能结算')
+        if (issued, supplemented, returned) != (row.issued_quantity, row.supplemented_quantity, row.returned_quantity):
+            raise HTTPException(409, '物料记录与领补退汇总不一致，请核查')
+        with localcontext() as context:
+            context.prec = 60
+            raw = actual_quantity * row.quantity_per_unit
+        theoretical = convert_quantity(session, raw, row.unit, row.base_unit) if raw else Decimal('0')
+        loss, rate = loss_values(theoretical, actual)
+        results.append({**material_data(row), 'final_theoretical_quantity': decimal_text(theoretical),
+                        'actual_used_quantity': decimal_text(actual), 'loss_quantity': decimal_text(loss),
+                        'loss_rate': decimal_text(rate) if rate is not None else None})
+    return order, rows, {'actual_quantity': decimal_text(actual_quantity), 'finished_product_unit': order.unit,
+                         'materials': results}
+
+
+def preview(session, user, identity, payload):
+    return prepare(session, user, identity, payload.actual_quantity)[2]
+
+
+def complete(session, user, identity, payload):
+    order, rows, calculation = prepare(session, user, identity, payload.actual_quantity)
+    order.actual_quantity = payload.actual_quantity
+    for row, result in zip(rows, calculation['materials']):
+        for field in ('final_theoretical_quantity', 'actual_used_quantity', 'loss_quantity', 'loss_rate'):
+            setattr(row, field, Decimal(result[field]) if result[field] is not None else None)
+    session.flush()
+    post_finished(session, user, FinishedStockInput(
+        request_id=f'production-complete-{order.id}', product_id=order.product_id,
+        quantity=order.actual_quantity, unit=order.unit, business_date=business_today(),
+        business_type='production', reference_no=order.order_no,
+    ), 'finished_receipt', production_order=order)
+    order.status = 'completed'
+    order.completed_at = order.updated_at = utcnow()
+    audit(session, user.id, 'complete_production_order', 'production_orders', order.id,
+          {'actual_quantity': decimal_text(order.actual_quantity), 'unit': order.unit})
+    session.flush()
+    return order_data(session, order)

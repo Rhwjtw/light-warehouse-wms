@@ -20,7 +20,9 @@ from app.unit_conversion import MAX_QUANTITY, convert_quantity, get_compatible_u
 
 
 def decimal_text(value: Decimal) -> str:
-    return format(value.normalize(), 'f')
+    # format 不受 Decimal 默认28位上下文影响，避免大损耗率在序列化时丢精度。
+    value_text = format(value, 'f')
+    return value_text.rstrip('0').rstrip('.') if '.' in value_text else value_text
 
 
 def storable_quantity(value: Decimal, label: str) -> Decimal:
@@ -62,6 +64,8 @@ def material_data(row: ProductionOrderMaterial) -> dict:
         'supplemented_quantity': decimal_text(row.supplemented_quantity),
         'returned_quantity': decimal_text(row.returned_quantity),
         'net_issued_quantity': decimal_text(net),
+        **{key: decimal_text(getattr(row, key)) if getattr(row, key) is not None else None
+           for key in ('final_theoretical_quantity', 'actual_used_quantity', 'loss_quantity', 'loss_rate')},
     }
 
 
@@ -73,6 +77,8 @@ def order_data(session, order: ProductionOrder, *, include_details: bool = True)
         'finished_product_id': order.product_id,
         'finished_product_name': order.product_name_snapshot,
         'planned_quantity': decimal_text(order.planned_quantity),
+        'actual_quantity': decimal_text(order.actual_quantity) if order.actual_quantity is not None else None,
+        'completed_at': order.completed_at.isoformat() if order.completed_at else None,
         'finished_product_unit': order.unit,
         'bom_id': order.bom_id,
         'bom_version': order.bom_version,
@@ -289,13 +295,13 @@ def post_material(session, user, order_id: int, payload, kind: str) -> dict:
             raise HTTPException(409, '请求标识已使用且内容或操作者不同，请刷新后重试')
         return posting_result(session, document)
 
+    order = find_order(session, order_id, lock=True)
+    if order.status not in ('ready', 'in_progress'):
+        raise HTTPException(409, '该生产单当前状态不能办理物料业务')
     existing = session.scalar(select(StockDocument).where(StockDocument.request_id == payload.request_id))
     if existing:
         return replay(existing)
 
-    order = find_order(session, order_id, lock=True)
-    if order.status not in ('ready', 'in_progress'):
-        raise HTTPException(409, '该生产单当前状态不能办理物料业务')
     order_material = session.scalar(select(ProductionOrderMaterial).where(
         ProductionOrderMaterial.id == payload.order_material_id,
         ProductionOrderMaterial.production_order_id == order.id,

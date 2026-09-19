@@ -27,11 +27,17 @@ def result_for(session, document):
             'after_quantity': format(transaction.after_quantity, 'f')}
 
 
-def post_finished(session, user, payload, kind):
+def post_finished(session, user, payload, kind, *, production_order=None):
     if session.get(Role, user.role_id).code not in ('admin', 'warehouse'):
         raise HTTPException(403, '仅管理员和仓库人员可以操作成品库存')
-    if payload.business_type != 'normal':
-        raise HTTPException(422, '生产入库将在生产完工阶段开放，当前只支持普通入出库')
+    if production_order is None and payload.business_type != 'normal':
+        raise HTTPException(422, '生产入库必须通过生产单完成操作')
+    if production_order is not None and (
+        kind != 'finished_receipt' or payload.business_type != 'production'
+        or payload.product_id != production_order.product_id or payload.unit != production_order.unit
+        or payload.quantity != production_order.actual_quantity
+    ):
+        raise HTTPException(422, '生产入库与生产单不一致')
     if payload.business_date > business_today():
         raise HTTPException(422, '入出库日期不能晚于业务今天')
     content = payload.model_dump(mode='json', exclude={'request_id'})
@@ -73,7 +79,7 @@ def post_finished(session, user, payload, kind):
         raise HTTPException(422, '成品库存超出可保存的数量上限')
     document = StockDocument(document_no='FG-' + uuid4().hex, request_id=payload.request_id,
                              request_hash=fingerprint, kind=kind, operator_id=user.id,
-                             business_date=payload.business_date, business_type='normal',
+                             business_date=payload.business_date, business_type=payload.business_type,
                              reference_no=payload.reference_no, notes=payload.notes)
     try:
         with session.begin_nested():
@@ -93,7 +99,8 @@ def post_finished(session, user, payload, kind):
     session.flush()
     movement = FinishedReceipt if incoming else FinishedOutbound
     # production_order_id 在既有 FinishedReceipt 中保留；普通接口永不写入生产单关联。
-    session.add(movement(document_id=document.id, batch_id=batch.id, quantity=payload.quantity))
+    linkage = {'production_order_id': production_order.id} if production_order is not None else {}
+    session.add(movement(document_id=document.id, batch_id=batch.id, quantity=payload.quantity, **linkage))
     session.flush()
     session.add(InventoryTransaction(document_id=document.id, finished_batch_id=batch.id, kind=kind,
                                     unit=product.unit, before_quantity=before, change_quantity=change,

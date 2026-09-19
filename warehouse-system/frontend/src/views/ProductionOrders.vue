@@ -4,6 +4,32 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { auth } from '../auth'
+import SettlementTable from '../components/SettlementTable.vue'
+
+const completeVisible = ref(false), completing = ref(false), settling = ref(false)
+const actualQuantity = ref(''), settlement = ref(null), settlementError = ref('')
+function openComplete() {
+  actualQuantity.value = ''; settlement.value = null; settlementError.value = ''; completeVisible.value = true
+}
+watch(actualQuantity, () => { settlement.value = null })
+async function previewSettlement() {
+  settlement.value = null; settlementError.value = ''; settling.value = true
+  const quantity = actualQuantity.value
+  try {
+    const result = (await api.post(`/production-orders/${current.value.id}/settlement-preview`, { actual_quantity: quantity })).data
+    if (actualQuantity.value === quantity) settlement.value = result
+  } catch (e) { settlementError.value = e.message }
+  finally { settling.value = false }
+}
+async function finishProduction() {
+  if (!settlement.value || completing.value) return
+  completing.value = true; settlementError.value = ''
+  try {
+    current.value = (await api.post(`/production-orders/${current.value.id}/complete`, { actual_quantity: actualQuantity.value })).data
+    completeVisible.value = false; ElMessage.success('生产已完成，成品已入库'); await load()
+  } catch (e) { settlementError.value = e.message; settlement.value = null }
+  finally { completing.value = false }
+}
 
 const route = useRoute()
 const canCreate = computed(() => auth.user?.role === 'admin')
@@ -206,19 +232,23 @@ onMounted(() => { load(); loadProducts() })
     <template #footer><el-button @click="createVisible=false">取消</el-button><el-button type="primary" :loading="creating" @click="createOrder">创建生产单</el-button></template>
   </el-dialog>
 
-  <el-dialog v-model="detailVisible" title="生产单详情" width="1120px" destroy-on-close :close-on-click-modal="false">
+  <el-dialog v-model="detailVisible" title="生产单详情" width="min(1280px, 95vw)" destroy-on-close :close-on-click-modal="false">
     <div v-loading="detailLoading">
       <template v-if="current">
         <div class="detail-toolbar"><div><strong>{{ current.order_no }}</strong><el-tag :type="statusTypes[current.status]">{{ statusNames[current.status] }}</el-tag></div><div><el-button v-if="canCreate && !['cancelled','completed','received'].includes(current.status)" @click="openEdit">编辑信息</el-button><el-button v-if="canCreate && !['cancelled','completed','received'].includes(current.status)" type="danger" plain @click="cancelOrder">取消生产单</el-button></div></div>
         <el-descriptions :column="3" border>
           <el-descriptions-item label="成品">{{ current.finished_product_name }}</el-descriptions-item>
           <el-descriptions-item label="计划生产">{{ amount(current.planned_quantity, current.finished_product_unit) }}</el-descriptions-item>
+          <el-descriptions-item label="实际生产">{{ current.actual_quantity == null ? '—' : amount(current.actual_quantity, current.finished_product_unit) }}</el-descriptions-item>
+          <el-descriptions-item label="完成时间">{{ dateTime(current.completed_at) }}</el-descriptions-item>
           <el-descriptions-item label="BOM版本">V{{ current.bom_version }}</el-descriptions-item>
           <el-descriptions-item label="计划日期">{{ current.planned_date || '—' }}</el-descriptions-item>
           <el-descriptions-item label="创建人">{{ current.created_by_name }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ dateTime(current.created_at) }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="3">{{ current.notes || '—' }}</el-descriptions-item>
         </el-descriptions>
+        <el-button v-if="canPost && ['ready','in_progress'].includes(current.status)" type="primary" style="margin-top:16px" @click="openComplete">完成生产</el-button>
+        <template v-if="current.status === 'completed'"><h3>原材料结算</h3><SettlementTable :rows="current.materials" /></template>
         <h3>原材料需求与当前净领用</h3>
         <el-table :data="current.materials" border stripe row-key="id">
           <el-table-column prop="material_name" label="原材料" min-width="150" />
@@ -244,6 +274,14 @@ onMounted(() => { load(); loadProducts() })
       </template>
     </div>
     <template #footer><el-button @click="detailVisible=false">关闭</el-button></template>
+  </el-dialog>
+
+  <el-dialog v-model="completeVisible" title="完成生产" width="min(1200px, 95vw)" :close-on-click-modal="false" :close-on-press-escape="!completing" :show-close="!completing">
+    <el-alert v-if="settlementError" :title="settlementError" type="error" show-icon style="margin-bottom:16px" />
+    <el-form label-width="120px" :disabled="completing"><el-form-item label="实际完成数量" required><el-input v-model="actualQuantity" inputmode="decimal" placeholder="填写最终实际产量"><template #append>{{ current?.finished_product_unit }}</template></el-input></el-form-item></el-form>
+    <el-button :loading="settling" :disabled="completing" @click="previewSettlement">预览结算</el-button>
+    <template v-if="settlement"><p>确认后成品入库 {{ settlement.actual_quantity }} {{ settlement.finished_product_unit }}，并冻结生产单。提交时系统会重新核对物料记录。</p><SettlementTable :rows="settlement.materials" /></template>
+    <template #footer><el-button :disabled="completing" @click="completeVisible=false">取消</el-button><el-button type="primary" :disabled="!settlement || settling" :loading="completing" @click="finishProduction">确认完成</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="editVisible" title="编辑生产单信息" width="520px" :close-on-click-modal="false">

@@ -178,6 +178,9 @@ class ProductionOrderMaterial(Identity, Timestamps, Base):
     supplemented_quantity: Mapped[Decimal] = mapped_column(QTY, default=Decimal('0'))
     returned_quantity: Mapped[Decimal] = mapped_column(QTY, default=Decimal('0'))
     final_theoretical_quantity: Mapped[Decimal | None] = mapped_column(QTY)
+    actual_used_quantity: Mapped[Decimal | None] = mapped_column(QTY)
+    loss_quantity: Mapped[Decimal | None] = mapped_column(QTY)
+    loss_rate: Mapped[Decimal | None] = mapped_column(Numeric(38, 12))
     __table_args__ = (
         UniqueConstraint('production_order_id', 'material_id'),
         CheckConstraint('quantity_per_unit > 0 AND planned_theoretical_quantity > 0 '

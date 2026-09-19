@@ -150,6 +150,10 @@ class ProductionOrderUpdateInput(InputModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
+class ProductionCompleteInput(InputModel):
+    actual_quantity: PositiveQuantity
+
+
 class ProductionAllocationInput(InputModel):
     batch_id: int = Field(gt=0)
     quantity: PositiveQuantity
