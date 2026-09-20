@@ -14,7 +14,7 @@ from starlette.exceptions import HTTPException
 from app.config import get_settings
 from app.database import engine
 from app.schemas import Envelope
-from app import auth, bom, catalog, users, stock, finished, production, losses
+from app import auth, bom, catalog, users, stock, finished, production, losses, overview
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from app.config import BACKEND_DIR
@@ -23,7 +23,7 @@ settings = get_settings()
 expected_revision = ScriptDirectory.from_config(Config(str(BACKEND_DIR / 'alembic.ini'))).get_current_head()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
 logger = logging.getLogger('warehouse')
-app = FastAPI(title=settings.app_name, version='0.7.0', description='第七阶段：生产完工、成品入库与损耗结算。')
+app = FastAPI(title=settings.app_name, version='0.8.0', description='第八阶段：预警、看板、基础权限与操作日志。')
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True,
                    allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Content-Type', 'Authorization', 'X-Request-ID'])
 
@@ -36,6 +36,7 @@ app.include_router(finished.router)
 app.include_router(bom.router)
 app.include_router(production.router)
 app.include_router(losses.router)
+app.include_router(overview.router)
 
 
 def error(status: int, code: str, message: str):
@@ -77,7 +78,7 @@ async def unexpected_error(request, exc):
 
 @app.get('/api/health', response_model=Envelope, tags=['系统状态'])
 def health():
-    return Envelope(data={'status': 'ok', 'version': '0.6.0', 'phase': 6,
+    return Envelope(data={'status': 'ok', 'version': '0.8.0', 'phase': 8,
                           'time': datetime.now(timezone.utc).isoformat(), 'timezone': settings.business_timezone})
 
 

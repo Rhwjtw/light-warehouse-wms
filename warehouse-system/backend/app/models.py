@@ -322,6 +322,8 @@ class SystemSetting(Base):
 class OperationLog(Identity, Base):
     __tablename__ = 'operation_logs'
     user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), index=True)
+    username_snapshot: Mapped[str | None] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(String(500))
     action: Mapped[str] = mapped_column(String(80), index=True)
     entity_type: Mapped[str] = mapped_column(String(64))
     entity_id: Mapped[str | None] = mapped_column(String(64))

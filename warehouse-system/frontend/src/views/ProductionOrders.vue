@@ -4,12 +4,22 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { auth } from '../auth'
+import { canAdjustProduction } from '../permissions'
 import SettlementTable from '../components/SettlementTable.vue'
 
+const registerVisible = ref(false), registering = ref(false), registeredQuantity = ref(''), registerError = ref('')
+function openRegister() { registeredQuantity.value = current.value.actual_quantity || ''; registerError.value = ''; registerVisible.value = true }
+async function registerActual() {
+  registering.value = true; registerError.value = ''
+  try {
+    current.value = (await api.put(`/production-orders/${current.value.id}/actual-quantity`, { actual_quantity: registeredQuantity.value })).data
+    registerVisible.value = false; ElMessage.success('实际产量已登记，待仓库确认完成生产'); await load()
+  } catch (e) { registerError.value = e.message } finally { registering.value = false }
+}
 const completeVisible = ref(false), completing = ref(false), settling = ref(false)
 const actualQuantity = ref(''), settlement = ref(null), settlementError = ref('')
 function openComplete() {
-  actualQuantity.value = ''; settlement.value = null; settlementError.value = ''; completeVisible.value = true
+  actualQuantity.value = current.value?.actual_quantity || ''; settlement.value = null; settlementError.value = ''; completeVisible.value = true
 }
 watch(actualQuantity, () => { settlement.value = null })
 async function previewSettlement() {
@@ -51,7 +61,7 @@ const statusTypes = { ready: 'warning', in_progress: 'primary', completed: 'succ
 const kindNames = { issue: '生产领料', supplement: '生产补料', return: '生产退料' }
 
 function dateTime(value) {
-  return value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—'
+  return value ? new Date(value).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false }) : '—'
 }
 function amount(value, unit) { return `${value ?? '0'} ${unit || ''}` }
 function validQuantity(value) { return positiveDecimal.test(String(value)) && /[1-9]/.test(String(value)) }
@@ -247,6 +257,7 @@ onMounted(() => { load(); loadProducts() })
           <el-descriptions-item label="创建时间">{{ dateTime(current.created_at) }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="3">{{ current.notes || '—' }}</el-descriptions-item>
         </el-descriptions>
+        <el-button v-if="canAdjustProduction(auth.user?.role) && ['ready','in_progress'].includes(current.status)" style="margin-top:16px" @click="openRegister">登记实际产量</el-button>
         <el-button v-if="canPost && ['ready','in_progress'].includes(current.status)" type="primary" style="margin-top:16px" @click="openComplete">完成生产</el-button>
         <template v-if="current.status === 'completed'"><h3>原材料结算</h3><SettlementTable :rows="current.materials" /></template>
         <h3>原材料需求与当前净领用</h3>
@@ -258,7 +269,7 @@ onMounted(() => { load(); loadProducts() })
           <el-table-column label="补料" min-width="100"><template #default="{row}">{{ amount(row.supplemented_quantity, row.base_unit) }}</template></el-table-column>
           <el-table-column label="退料" min-width="100"><template #default="{row}">{{ amount(row.returned_quantity, row.base_unit) }}</template></el-table-column>
           <el-table-column label="当前净领用" min-width="125"><template #default="{row}"><strong>{{ amount(row.net_issued_quantity, row.base_unit) }}</strong></template></el-table-column>
-          <el-table-column v-if="canPost && ['ready','in_progress'].includes(current.status)" label="操作" width="175" fixed="right"><template #default="{row}"><el-button link type="primary" @click="openAction('issue',row)">领料</el-button><el-button link type="warning" @click="openAction('supplement',row)">补料</el-button><el-button link type="success" @click="openAction('return',row)">退料</el-button></template></el-table-column>
+          <el-table-column v-if="canAdjustProduction(auth.user?.role) && ['ready','in_progress'].includes(current.status)" label="操作" width="175" fixed="right"><template #default="{row}"><el-button v-if="canPost" link type="primary" @click="openAction('issue',row)">领料</el-button><el-button link type="warning" @click="openAction('supplement',row)">补料</el-button><el-button link type="success" @click="openAction('return',row)">退料</el-button></template></el-table-column>
         </el-table>
         <h3>物料操作记录</h3>
         <el-table :data="current.material_records" stripe empty-text="尚未发生物料业务">
@@ -307,6 +318,12 @@ onMounted(() => { load(); loadProducts() })
     </el-table>
     <el-form label-width="70px" style="margin-top:16px"><el-form-item label="备注"><el-input v-model="action.notes" maxlength="2000" /></el-form-item></el-form>
     <template #footer><el-button @click="actionVisible=false">取消</el-button><el-button type="primary" :loading="actionSaving" @click="submitAction">确认{{ actionNames[action.kind] }}</el-button></template>
+  </el-dialog>
+  <el-dialog v-model="registerVisible" title="登记实际产量" width="480px" :close-on-click-modal="false">
+    <el-alert title="登记不会自动入库；由仓库预览结算并完成生产。" type="info" :closable="false" />
+    <el-alert v-if="registerError" :title="registerError" type="error" :closable="false" />
+    <el-form @submit.prevent="registerActual"><el-form-item label="实际数量"><el-input v-model="registeredQuantity" :disabled="registering" inputmode="decimal"><template #append>{{ current?.finished_product_unit }}</template></el-input></el-form-item></el-form>
+    <template #footer><el-button @click="registerVisible = false" :disabled="registering">取消</el-button><el-button type="primary" @click="registerActual" :loading="registering">保存产量</el-button></template>
   </el-dialog>
 </template>
 

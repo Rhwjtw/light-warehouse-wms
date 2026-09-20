@@ -318,7 +318,7 @@ def test_cancel_rules_and_permissions(context):
     assert blocked.status_code == 409 and '物料业务' in blocked.json()['message']
     workshop = post_material(used, 'supplement', used['order']['materials'][0]['id'],
                              [{'batch_id': used['batches'][0], 'quantity': '0.1'}], role='workshop')
-    assert workshop.status_code == 403
+    assert workshop.status_code == 200  # 第八阶段明确开放车间直接登记补料。
 
 
 def test_order_list_search_pagination_and_update(context):

@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.database import get_session
 from app.models import OperationLog, Role, User
 from app.schemas import Envelope, LoginInput, PasswordChange
+from app.audit_labels import ACTIONS, MODULES
 
 SessionDep = Annotated[Session, Depends(get_session, scope='function')]
 bearer = HTTPBearer(auto_error=False)
@@ -44,13 +45,18 @@ DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 
 def audit(session, user_id, action, entity_type, entity_id=None, details=None):
     # 只存业务摘要，绝不记录密码、哈希或令牌。
+    user = session.get(User, user_id) if user_id else None
     session.add(OperationLog(user_id=user_id, action=action, entity_type=entity_type,
-                             entity_id=str(entity_id) if entity_id is not None else None, details=details))
+                             entity_id=str(entity_id) if entity_id is not None else None, details=details,
+                             username_snapshot=user.username if user else None,
+                             description=f'{ACTIONS.get(action, action)} · {MODULES.get(entity_type, entity_type)}'
+                             + (f' #{entity_id}' if entity_id is not None else '')))
 
 
 def public_user(user, session):
     role = session.get(Role, user.role_id)
     return {'id': user.id, 'username': user.username, 'display_name': user.display_name,
+            'business_timezone': get_settings().business_timezone,
             'role_id': user.role_id, 'role': role.code, 'role_name': role.name,
             'is_active': user.is_active, 'created_at': user.created_at.isoformat(),
             'updated_at': user.updated_at.isoformat()}

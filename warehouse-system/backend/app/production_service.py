@@ -273,8 +273,9 @@ def create_inventory_transaction(session, **values):
 
 def post_material(session, user, order_id: int, payload, kind: str) -> dict:
     role = session.get(Role, user.role_id)
-    if role is None or role.code not in ('admin', 'warehouse'):
-        raise HTTPException(403, '仅管理员和仓库人员可以办理生产领料、补料和退料')
+    allowed = ('admin', 'warehouse', 'workshop') if kind in ('supplement', 'return') else ('admin', 'warehouse')
+    if role is None or role.code not in allowed:
+        raise HTTPException(403, '当前角色不能办理此生产物料操作')
     if kind not in ('issue', 'supplement', 'return'):
         raise ValueError('unsupported production material kind')
     batch_ids = [row.batch_id for row in payload.allocations]

@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { api } from '../api'
+import { auth } from '../auth'
 const filters = reactive({ order_no: '', product: '', material: '', date_from: '', date_to: '' })
 const rows = ref([]), total = ref(0), page = ref(1), loading = ref(false), error = ref('')
 async function load() {
@@ -31,7 +32,7 @@ onMounted(load)
       <el-table-column prop="material_name" label="原材料" min-width="130" />
       <el-table-column v-for="[key,label] in [['final_theoretical_quantity','最终理论'],['actual_used_quantity','实际用量'],['loss_quantity','损耗数量']]" :key="key" :label="label" min-width="140"><template #default="{row}">{{ row[key] }} {{ row.base_unit }}<small v-if="key==='loss_quantity' && Number(row[key])<0">（节余 / 负损耗）</small></template></el-table-column>
       <el-table-column label="损耗率" width="105"><template #default="{row}">{{ row.loss_rate == null ? '—' : `${Number(row.loss_rate).toFixed(2)}%` }}</template></el-table-column>
-      <el-table-column label="完成时间" min-width="185"><template #default="{row}">{{ new Date(row.completed_at).toLocaleString('zh-CN', { timeZone:'Asia/Shanghai', hour12:false }) }}</template></el-table-column>
+      <el-table-column label="完成时间" min-width="185"><template #default="{row}">{{ new Date(row.completed_at).toLocaleString('zh-CN', { timeZone:auth.user?.business_timezone || 'Asia/Shanghai', hour12:false }) }}</template></el-table-column>
     </el-table>
     <el-pagination v-model:current-page="page" :total="total" :page-size="20" layout="total, prev, pager, next" class="pagination" @current-change="load" />
   </el-card>

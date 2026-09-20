@@ -1,11 +1,11 @@
 """生产单与车间领料、补料、退料 API。"""
 from decimal import Decimal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, or_, select
 
-from app.auth import SessionDep, UserDep
-from app.models import ProductionOrder
+from app.auth import SessionDep, UserDep, audit
+from app.models import ProductionOrder, Role
 from app.production_service import (
     cancel_order, create_order, fefo_suggestion, find_order, order_data,
     post_material, update_order,
@@ -18,6 +18,20 @@ from app.schemas import (
 from app.settlement_service import preview as settlement_preview, complete as complete_order
 
 router = APIRouter(prefix='/api/production-orders', tags=['生产单'])
+
+
+@router.put('/{identity}/actual-quantity', response_model=Envelope)
+def register_actual(identity: int, payload: ProductionCompleteInput, user: UserDep, session: SessionDep):
+    if session.get(Role, user.role_id).code not in ('admin', 'warehouse', 'workshop'):
+        raise HTTPException(403, '当前角色不能登记产量')
+    order = find_order(session, identity, lock=True)
+    if order.status not in ('ready', 'in_progress'):
+        raise HTTPException(409, '当前生产单不能修改实际产量')
+    order.actual_quantity = payload.actual_quantity
+    audit(session, user.id, 'register_actual_quantity', 'production_orders', order.id,
+          {'actual_quantity': str(payload.actual_quantity)})
+    session.flush()
+    return Envelope(data=order_data(session, order))
 
 @router.post('/{identity}/settlement-preview', response_model=Envelope)
 def preview(identity: int, payload: ProductionCompleteInput, user: UserDep, session: SessionDep):

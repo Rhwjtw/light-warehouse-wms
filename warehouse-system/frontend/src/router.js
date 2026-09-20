@@ -1,6 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Dashboard from './views/Dashboard.vue'
-import ModulePlaceholder from './views/ModulePlaceholder.vue'
+import Expiry from './views/Expiry.vue'
+import Settings from './views/Settings.vue'
+import OperationLogs from './views/OperationLogs.vue'
+import { canAccess } from './permissions'
 import Catalog from './views/Catalog.vue'
 import Users from './views/Users.vue'
 import Login from './views/Login.vue'
@@ -25,7 +28,7 @@ const router = createRouter({
     { path: '/login', component: Login, meta: { title: '登录', public: true } },
     { path: '/', component: Dashboard, meta: { title: '首页' } },
     ...menuGroups.flatMap(group => group.items.map(([path, label]) => ({
-      path: `/${path}`, component: path === 'losses' ? Losses : path === 'boms' ? Boms : ['orders','issues','supplements','returns'].includes(path) ? ProductionOrders : ['finished-receipts','finished-outbounds','finished-stock'].includes(path) ? FinishedInventory : ['material-receipts','material-outbounds','material-stock','batches','material-transactions'].includes(path) ? MaterialInventory : path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : ModulePlaceholder,
+      path: `/${path}`, component: path === 'expiry' ? Expiry : path === 'settings' ? Settings : path === 'logs' ? OperationLogs : path === 'losses' ? Losses : path === 'boms' ? Boms : ['orders','issues','supplements','returns'].includes(path) ? ProductionOrders : ['finished-receipts','finished-outbounds','finished-stock'].includes(path) ? FinishedInventory : ['material-receipts','material-outbounds','material-stock','batches','material-transactions'].includes(path) ? MaterialInventory : path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : Dashboard,
       meta: { title: label, group: group.label, resource: path, admin: ['users', 'settings', 'logs'].includes(path) },
     }))),
     { path: '/:pathMatch(.*)*', redirect: '/' },
@@ -35,7 +38,7 @@ router.beforeEach(async to => {
   if (to.meta.public) return true
   try {
     if (!await restoreAuth()) return { path: '/login', query: { redirect: to.fullPath } }
-    if (to.meta.admin && auth.user.role !== 'admin') return '/'
+    if (!canAccess(auth.user.role, to.meta.resource)) return '/'
   } catch { return { path: '/login', query: { redirect: to.fullPath } } }
 })
 window.addEventListener('wms-auth-expired', () => { if (router.currentRoute.value.path !== '/login') router.replace('/login') })

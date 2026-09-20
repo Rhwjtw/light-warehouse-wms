@@ -31,7 +31,7 @@ const columns = computed(() => resource.value === 'material-stock' ? [
 ])
 function display(row, key) {
   if (key === 'kind') return ({ material_receipt: '原料入库', material_outbound: '原料出库', issue: '生产领料', supplement: '生产补料', return: '生产退料' })[row[key]] || row[key]
-  if (key === 'created_at') return new Date(row[key]).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
+  if (key === 'created_at') return new Date(row[key]).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false })
   return row[key]
 }
 const optionGeneration = {}

@@ -10,7 +10,7 @@ const resource = computed(() => route.meta.resource)
 const isStock = computed(() => resource.value === 'finished-stock')
 const isReceipt = computed(() => resource.value === 'finished-receipts')
 const canWrite = computed(() => ['admin', 'warehouse'].includes(auth.user?.role))
-const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 const form = reactive({ product_id: null, quantity: '', business_date: today(), business_type: 'normal', reference_no: '', notes: '' })
 const products = ref([]), selected = ref(null), selecting = ref(false), saving = ref(false)
 const error = ref(''), success = ref(null), rows = ref([]), loading = ref(false), total = ref(0)
@@ -32,7 +32,7 @@ const detailFields = [['document_no', '库存单据号'], ['created_at', '记账
   ['reference_no', '关联单据'], ['operator_name', '操作人员'], ['notes', '备注']]
 function display(row, key) {
   if (row[key] == null || row[key] === '') return '—'
-  if (key.endsWith('_at')) return new Date(row[key]).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
+  if (key.endsWith('_at')) return new Date(row[key]).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false })
   if (key === 'kind') return row[key] === 'finished_receipt' ? '成品入库' : '成品出库'
   if (key === 'business_type') return row[key] === 'production' ? '生产入库' : row.kind === 'finished_receipt' ? '普通入库' : '普通出库'
   return row[key]

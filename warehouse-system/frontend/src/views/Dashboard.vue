@@ -1,49 +1,54 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { api } from '../api'
-
-const loading = ref(false)
-const backend = ref(null)
-const database = ref(null)
-const failures = ref([])
-const checkedAt = ref('尚未检查')
-const counts = ref({})
-async function refresh() {
-  loading.value = true
-  failures.value = []
-  backend.value = null
-  database.value = null
-  counts.value = {}
-  const results = await Promise.allSettled([api.get('/health'), api.get('/health/db'), api.get('/materials', { params: { page_size: 1 } }), api.get('/products', { params: { page_size: 1 } })])
-  if (results[0].status === 'fulfilled') backend.value = results[0].value.data
-  else failures.value.push(results[0].reason.message)
-  if (results[1].status === 'fulfilled') database.value = results[1].value.data
-  else failures.value.push(results[1].reason.message)
-  if (results[2].status === 'fulfilled') counts.value['原材料种类'] = results[2].value.data.total
-  else failures.value.push(results[2].reason.message)
-  if (results[3].status === 'fulfilled') counts.value['成品种类'] = results[3].value.data.total
-  else failures.value.push(results[3].reason.message)
-  checkedAt.value = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
-  loading.value = false
+import { dateTime, kindNames, statusNames } from '../display'
+const data = ref(null), transactions = ref([]), orders = ref([]), loading = ref(false), error = ref('')
+const metrics = { materials:'原材料种类', products:'成品种类', stocked_batches:'有库存原料批次', in_progress_orders:'生产中生产单', low_stock_materials:'库存不足原材料' }
+const todayLabels = { material_in:'今日原材料入库', material_out:'今日原材料出库', finished_in:'今日成品入库', finished_out:'今日成品出库' }
+async function load() {
+  loading.value = true; error.value = ''
+  try {
+    const [summary, ledger, production] = await Promise.all([api.get('/dashboard/summary'), api.get('/dashboard/recent-transactions'), api.get('/dashboard/recent-production-orders')])
+    data.value = summary.data; transactions.value = ledger.data.items; orders.value = production.data.items
+  } catch (e) { error.value = e.message; data.value = null; transactions.value = []; orders.value = [] }
+  finally { loading.value = false }
 }
-const metrics = ['原材料种类', '成品种类', '当前生产单', '今日入库', '今日出库', '临期批次', '过期批次', '库存不足']
-onMounted(refresh)
+onMounted(load)
 </script>
-
 <template>
-  <div class="page-heading"><div><h1>仓库工作台</h1><p>库存清楚，生产有据。仓库与车间的日常工作从这里开始。</p></div><el-button :loading="loading" @click="refresh">刷新连接状态</el-button></div>
-  <el-alert title="生产单与车间领补退已开放" description="可以保存 BOM 快照和计划理论需求，并按批次办理 FEFO 领料、补料与退料；完工入库和损耗在下一阶段开放。" type="info" show-icon :closable="false" />
-  <div class="status-grid">
-    <el-card shadow="never"><div class="card-label">API 服务 <el-tag :type="backend ? 'success' : 'warning'">{{ loading ? '检查中' : backend ? '运行正常' : '未连接' }}</el-tag></div><h2>FastAPI <small>{{ backend?.version || '—' }}</small></h2><p>统一接口 · UTC 时间 · Swagger 文档</p></el-card>
-    <el-card shadow="never"><div class="card-label">数据库 <el-tag :type="database ? 'success' : 'warning'">{{ loading ? '检查中' : database ? '连接正常' : '待检查' }}</el-tag></div><h2>MySQL <small>{{ database?.version || '—' }}</small></h2><p>迁移版本：{{ database?.migration || '尚未验证' }}</p></el-card>
-    <el-card shadow="never"><div class="card-label">开发进度 <el-tag type="info">6 / 9 阶段</el-tag></div><h2>生产领料</h2><p>下一阶段：实际产量、生产入库与损耗</p></el-card>
+  <div class="page-heading"><div><h1>仓库工作台</h1><p>库存、生产与有效期一览。{{ data?.business_date }} {{ data?.timezone }}</p></div><el-button :loading="loading" @click="load">刷新数据</el-button></div>
+  <el-alert v-if="error" :title="error" type="error" :closable="false" />
+  <div v-loading="loading">
+    <div class="metrics dashboard-counts"><el-card v-for="(label,key) in metrics" :key="key" shadow="never"><div class="metric-label">{{ label }}</div><div class="metric-value">{{ data?.[key] ?? '—' }}</div></el-card></div>
+    <div class="metrics"><el-card v-for="(label,key) in todayLabels" :key="key" shadow="never"><div class="metric-label">{{ label }}</div><h3 v-if="data">{{ data.today[key].map(row => `${row.quantity} ${row.unit}`).join(' / ') || '0' }}</h3><h3 v-else>—</h3></el-card></div>
+    <p>今日按实际记账时间统计；原材料入库含生产退料，出库含生产领料和补料，不同单位分别汇总。</p>
+    <div class="section-heading"><h3>有效期预警</h3><el-button link type="primary" @click="$router.push('/expiry')">查看批次</el-button></div>
+    <div class="metrics">
+      <el-card shadow="never"><div>已过期批次</div><h2>{{ data?.expired_batches ?? '—' }}</h2></el-card>
+      <el-card shadow="never"><div>{{ data?.urgent_expiry_days ?? '—' }} 天内到期批次</div><h2>{{ data?.urgent_batches ?? '—' }}</h2></el-card>
+      <el-card shadow="never"><div>{{ data?.warning_expiry_days ?? '—' }} 天内到期批次（含严重临期）</div><h2>{{ data?.warning_batches ?? '—' }}</h2></el-card>
+    </div>
+    <el-card shadow="never"><template #header><strong>最近库存流水 · 10 条</strong></template>
+      <el-table :data="transactions" empty-text="暂无库存流水">
+        <el-table-column label="时间" min-width="170"><template #default="{row}">{{ dateTime(row.created_at, data?.timezone) }}</template></el-table-column>
+        <el-table-column prop="name" label="原材料 / 成品" min-width="140" /><el-table-column label="类型" min-width="110"><template #default="{row}">{{ kindNames[row.kind] }}</template></el-table-column>
+        <el-table-column label="数量变化" min-width="130"><template #default="{row}">{{ row.change_quantity }} {{ row.unit }}</template></el-table-column>
+        <el-table-column prop="document_no" label="单据号" min-width="190" /><el-table-column prop="reference_no" label="关联单号" min-width="150" /><el-table-column prop="operator" label="操作人" min-width="100" />
+      </el-table>
+    </el-card>
+    <el-card shadow="never" style="margin-top:20px"><template #header><strong>最近生产单 · 10 条</strong></template>
+      <el-table :data="orders" empty-text="暂无生产单">
+        <el-table-column prop="order_no" label="生产单号" min-width="180" /><el-table-column prop="product_name" label="成品" min-width="130" />
+        <el-table-column label="计划数量" min-width="130"><template #default="{row}">{{ row.planned_quantity }} {{ row.unit }}</template></el-table-column>
+        <el-table-column label="实际数量" min-width="130"><template #default="{row}">{{ row.actual_quantity ?? '—' }} {{ row.unit }}</template></el-table-column>
+        <el-table-column label="状态" width="110"><template #default="{row}">{{ statusNames[row.status] }}</template></el-table-column>
+        <el-table-column label="创建时间" min-width="180"><template #default="{row}">{{ dateTime(row.created_at, data?.timezone) }}</template></el-table-column>
+      </el-table>
+    </el-card>
   </div>
-  <el-alert v-for="message in failures" :key="message" :title="message" type="error" show-icon :closable="false" class="error-alert" />
-  <div class="section-heading"><h3>业务概览</h3><span>库存与生产统计尚未开放</span></div>
-  <div class="metrics"><el-card v-for="label in metrics" :key="label" shadow="never"><div class="metric-label">{{ label }}</div><div class="metric-value">{{ counts[label] ?? '—' }}</div><small>{{ counts[label] !== undefined ? '当前档案数量' : '待接入' }}</small></el-card></div>
-  <div class="recent-grid">
-    <el-card shadow="never"><template #header><strong>库存流水</strong></template><p>原材料流水已可查询，首页最近流水卡片将在完整看板阶段接入。</p><el-button @click="$router.push('/material-transactions')">查看原材料流水</el-button></el-card>
-    <el-card shadow="never"><template #header><strong>最近生产单</strong></template><el-empty :image-size="70" description="生产单已开放；首页卡片将在完整看板阶段接入" /></el-card>
-  </div>
-  <div class="page-footer"><span>最后检查：{{ checkedAt }}（北京时间）</span><a href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener">打开 API 文档 ↗</a></div>
 </template>
+
+<style scoped>
+.dashboard-counts { grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); margin-bottom: 16px; }
+.metric-value { color: #24364b; font-weight: 600; }
+</style>
