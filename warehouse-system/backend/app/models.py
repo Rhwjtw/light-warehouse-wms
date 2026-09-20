@@ -1,4 +1,4 @@
-"""第一版业务模型。库存写入接口将在后续阶段通过事务服务实现。"""
+"""第一版业务模型。库存由事务服务记账，所有变动伴随流水。"""
 from datetime import date, datetime, timezone
 from decimal import Decimal
 

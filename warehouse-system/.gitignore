@@ -13,3 +13,14 @@ dist/
 .coverage
 coverage/
 .DS_Store
+
+# Local tools, test reports and backups
+.npm-cache/
+.vscode/
+.idea/
+*.bak
+*.sql
+*.dump
+htmlcov/
+playwright-report/
+test-results/

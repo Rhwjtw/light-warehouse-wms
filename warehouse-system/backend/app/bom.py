@@ -13,7 +13,9 @@ router = APIRouter(prefix='/api', tags=['BOM 配方'])
 
 
 def decimal_text(value: Decimal) -> str:
-    return format(value.normalize(), 'f')
+    # normalize() uses the default 28-digit context and can round large previews.
+    value_text = format(value, 'f')
+    return value_text.rstrip('0').rstrip('.') if '.' in value_text else value_text
 
 
 def find_bom(session, identity: int, *, lock: bool = False) -> BomHeader:

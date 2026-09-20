@@ -23,7 +23,7 @@ settings = get_settings()
 expected_revision = ScriptDirectory.from_config(Config(str(BACKEND_DIR / 'alembic.ini'))).get_current_head()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
 logger = logging.getLogger('warehouse')
-app = FastAPI(title=settings.app_name, version='0.8.0', description='第八阶段：预警、看板、基础权限与操作日志。')
+app = FastAPI(title=settings.app_name, version='1.0.0', description='V1.0：仓库管理、生产领补退与损耗追溯。')
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True,
                    allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Content-Type', 'Authorization', 'X-Request-ID'])
 
@@ -78,7 +78,7 @@ async def unexpected_error(request, exc):
 
 @app.get('/api/health', response_model=Envelope, tags=['系统状态'])
 def health():
-    return Envelope(data={'status': 'ok', 'version': '0.8.0', 'phase': 8,
+    return Envelope(data={'status': 'ok', 'version': '1.0.0', 'phase': 9,
                           'time': datetime.now(timezone.utc).isoformat(), 'timezone': settings.business_timezone})
 
 

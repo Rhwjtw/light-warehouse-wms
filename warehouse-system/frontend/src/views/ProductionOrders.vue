@@ -1,4 +1,6 @@
 <script setup>
+import { postingRequest } from '../postingRequest'
+import { quantityUnits, quantityText } from '../quantity'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -145,14 +147,14 @@ async function cancelOrder() {
 function returnCandidates(material) {
   const map = new Map()
   for (const record of current.value.material_records.filter(row => row.order_material_id === material.id)) {
-    const existing = map.get(record.batch_id) || { batch_id: record.batch_id, batch_no: record.batch_no, remaining_quantity: '—', expiry_date: '原领料批次', max_return: 0 }
-    existing.max_return += (record.kind === 'return' ? -1 : 1) * Number(record.quantity)
+    const existing = map.get(record.batch_id) || { batch_id: record.batch_id, batch_no: record.batch_no, remaining_quantity: '—', expiry_date: '原领料批次', max_return: '0' }
+    existing.max_return = quantityText(quantityUnits(existing.max_return) + (record.kind === 'return' ? -1n : 1n) * quantityUnits(record.quantity))
     map.set(record.batch_id, existing)
   }
-  return [...map.values()].filter(row => row.max_return > 0).map(row => ({ ...row, quantity: '' }))
+  return [...map.values()].filter(row => quantityUnits(row.max_return) > 0n).map(row => ({ ...row, quantity: '' }))
 }
 async function openAction(kind, material) {
-  Object.assign(action, { kind, material, desired: '', unit: material.base_unit, notes: '', allocations: [] })
+  Object.assign(action, { kind, material, desired: '', unit: material.base_unit, notes: '', allocations: [], requestKey: '', requestContent: '' })
   actionVisible.value = true; error.value = ''
   if (kind === 'return') {
     action.allocations = returnCandidates(material); return
@@ -175,20 +177,21 @@ async function applySuggestion() {
   await loadCandidates()
 }
 async function submitAction() {
+  if (action.allocations.some(row => String(row.quantity).trim() !== '' && !validQuantity(row.quantity))) {
+    error.value = '批次数量必须大于 0 且最多六位小数'; return
+  }
   const allocations = action.allocations
     .filter(row => validQuantity(row.quantity))
     .map(row => ({ batch_id: row.batch_id ?? row.id, quantity: String(row.quantity) }))
   if (!allocations.length) { error.value = '请至少填写一个批次的正数量'; return }
   if (action.kind === 'return' && allocations.some(row => {
     const candidate = action.allocations.find(item => (item.batch_id ?? item.id) === row.batch_id)
-    return Number(row.quantity) > Number(candidate.max_return)
+    return quantityUnits(row.quantity) > quantityUnits(candidate.max_return)
   })) { error.value = '退料数量不能超过该生产单在对应批次的累计净领出量'; return }
   actionSaving.value = true; error.value = ''
   try {
-    await api.post(`/production-orders/${current.value.id}/${action.kind}`, {
-      request_id: requestId(), order_material_id: action.material.id, unit: action.unit,
-      allocations, notes: action.notes || null,
-    })
+    const payload = { order_material_id: action.material.id, unit: action.unit, allocations, notes: action.notes || null }
+    await api.post(`/production-orders/${current.value.id}/${action.kind}`, postingRequest(action, payload, requestId))
     actionVisible.value = false; ElMessage.success(`${actionNames[action.kind]}成功`)
     await refreshDetail(); await load()
   } catch (e) { error.value = e.message }
@@ -224,6 +227,7 @@ onMounted(() => { load(); loadProducts() })
   </el-card>
 
   <el-dialog v-model="createVisible" title="新建生产单" width="820px" destroy-on-close :close-on-click-modal="false">
+    <el-alert v-if="error" :title="error" type="error" show-icon style="margin-bottom:16px" />
     <el-form label-width="110px" :disabled="creating">
       <el-form-item label="成品" required><el-select v-model="createForm.finished_product_id" filterable remote :remote-method="loadProducts" placeholder="输入成品编码或名称"><el-option v-for="item in products" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name} (${item.unit})`" /></el-select></el-form-item>
       <el-form-item label="计划数量" required><el-input v-model="createForm.planned_quantity" inputmode="decimal" placeholder="如 1000" /></el-form-item>
@@ -296,11 +300,13 @@ onMounted(() => { load(); loadProducts() })
   </el-dialog>
 
   <el-dialog v-model="editVisible" title="编辑生产单信息" width="520px" :close-on-click-modal="false">
+    <el-alert v-if="error" :title="error" type="error" show-icon style="margin-bottom:16px" />
     <el-form label-width="100px"><el-form-item label="计划日期"><el-date-picker v-model="editForm.planned_date" type="date" value-format="YYYY-MM-DD" /></el-form-item><el-form-item label="备注"><el-input v-model="editForm.notes" type="textarea" maxlength="2000" /></el-form-item></el-form>
     <template #footer><el-button @click="editVisible=false">取消</el-button><el-button type="primary" :loading="editSaving" @click="saveEdit">保存</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="actionVisible" :title="`${actionNames[action.kind]} · ${action.material?.material_name || ''}`" width="820px" :close-on-click-modal="false">
+    <el-alert v-if="error" :title="error" type="error" show-icon style="margin-bottom:16px" />
     <el-alert v-if="action.kind !== 'return'" title="批次按到期日、入库时间、批次 ID 依次推荐；可修改各批次数量，但过期或库存不足会由服务端拒绝。" type="info" :closable="false" style="margin-bottom:16px" />
     <el-alert v-else title="退料只能回到本生产单实际领用过的原批次，并且不能超过该批次累计净领出量。" type="info" :closable="false" style="margin-bottom:16px" />
     <div v-if="action.material" class="action-summary">
