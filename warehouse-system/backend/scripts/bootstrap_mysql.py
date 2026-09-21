@@ -36,7 +36,7 @@ def main():
                          connect_timeout=5, autocommit=True) as connection:
         with connection.cursor() as cursor:
             cursor.execute(f'CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci')
-            for user, key, grants in ((app_user, 'MYSQL_PASSWORD', 'SELECT, INSERT'),
+            for user, key, grants in ((app_user, 'MYSQL_PASSWORD', 'SELECT'),
                                        (migration_user, 'MYSQL_MIGRATION_PASSWORD', 'ALL PRIVILEGES')):
                 cursor.execute('CREATE USER IF NOT EXISTS %s@\'localhost\' IDENTIFIED BY %s', (user, values[key]))
                 if user == app_user:
@@ -48,6 +48,8 @@ def main():
             subprocess.run([sys.executable, '-m', 'alembic', 'upgrade', 'head'], cwd=ENV.parent, check=True)
             cursor.execute('SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = %s', (database,))
             for (table,) in cursor.fetchall():
+                if table != 'alembic_version':
+                    cursor.execute(f'GRANT INSERT ON `{database}`.`{table}` TO %s@\'localhost\'', (app_user,))
                 if table not in ('inventory_transactions', 'operation_logs', 'alembic_version'):
                     cursor.execute(f'GRANT UPDATE, DELETE ON `{database}`.`{table}` TO %s@\'localhost\'', (app_user,))
             cursor.execute('SELECT VERSION()')

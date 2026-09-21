@@ -1,12 +1,14 @@
 import logging
 import time
 from datetime import datetime, timezone
+from pathlib import Path
+import traceback
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from starlette.exceptions import HTTPException
@@ -21,11 +23,19 @@ from app.config import BACKEND_DIR
 
 settings = get_settings()
 expected_revision = ScriptDirectory.from_config(Config(str(BACKEND_DIR / 'alembic.ini'))).get_current_head()
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
+logging.basicConfig(level=getattr(logging, settings.log_level),
+                    format='%(asctime)s %(levelname)s %(name)s %(message)s')
 logger = logging.getLogger('warehouse')
-app = FastAPI(title=settings.app_name, version='1.0.0', description='V1.0：仓库管理、生产领补退与损耗追溯。')
-app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True,
-                   allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Content-Type', 'Authorization', 'X-Request-ID'])
+logger.setLevel(getattr(logging, settings.log_level))
+app = FastAPI(title=settings.app_name, version='1.0.0',
+              description='V1.0：仓库管理、生产领补退与损耗追溯。',
+              docs_url='/docs' if settings.api_docs_enabled else None,
+              redoc_url=None,
+              openapi_url='/openapi.json' if settings.api_docs_enabled else None)
+if settings.cors_origins:
+    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True,
+                       allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+                       allow_headers=['Content-Type', 'Authorization', 'X-Request-ID'])
 
 
 app.include_router(auth.router)
@@ -46,9 +56,13 @@ def error(status: int, code: str, message: str):
 @app.middleware('http')
 async def request_log(request: Request, call_next):
     request_id = str(uuid4())
+    request.state.request_id = request_id
     started = time.perf_counter()
     response = await call_next(request)
     response.headers['X-Request-ID'] = request_id
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'same-origin'
     logger.info('%s %s %s %.1fms request_id=%s', request.method, request.url.path,
                 response.status_code, (time.perf_counter() - started) * 1000, request_id)
     return response
@@ -71,14 +85,17 @@ async def integrity_error(request, exc):
 
 @app.exception_handler(Exception)
 async def unexpected_error(request, exc):
-    # 不将 SQL、连接信息或用户输入写入响应/日志。
-    logger.error('Unhandled error type=%s path=%s', type(exc).__name__, request.url.path)
+    # 只记录代码位置，不记录异常正文、SQL 参数、密码或用户输入。
+    frames = traceback.extract_tb(exc.__traceback__)
+    location = ' <- '.join(f'{Path(frame.filename).name}:{frame.lineno}:{frame.name}' for frame in frames[-6:])
+    logger.error('Unhandled error type=%s path=%s request_id=%s stack=%s', type(exc).__name__,
+                 request.url.path, getattr(request.state, 'request_id', '-'), location or '-')
     return error(500, 'INTERNAL_ERROR', '服务暂时不可用，请稍后重试')
 
 
 @app.get('/api/health', response_model=Envelope, tags=['系统状态'])
 def health():
-    return Envelope(data={'status': 'ok', 'version': '1.0.0', 'phase': 9,
+    return Envelope(data={'status': 'ok', 'version': '1.0.0', 'phase': 10,
                           'time': datetime.now(timezone.utc).isoformat(), 'timezone': settings.business_timezone})
 
 
@@ -94,3 +111,27 @@ def database_health():
     except SQLAlchemyError as exc:
         logger.warning('Database readiness failed type=%s', type(exc).__name__)
         return error(503, 'DATABASE_NOT_READY', '数据库连接或迁移尚未就绪，请检查配置并运行迁移')
+
+
+if settings.serve_frontend:
+    frontend_dir = settings.frontend_directory
+    frontend_index = frontend_dir / 'index.html'
+    if not frontend_index.is_file():
+        raise RuntimeError('未找到前端生产构建，请先在 frontend 执行 npm run build')
+
+    @app.get('/{full_path:path}', include_in_schema=False)
+    def production_frontend(full_path: str):
+        # API 不存在时仍返回 JSON 404，不能被 Vue history 回退吞掉。
+        if full_path == 'api' or full_path.startswith('api/'):
+            raise HTTPException(404, '接口不存在')
+        if not settings.api_docs_enabled and full_path in {'docs', 'redoc', 'openapi.json'}:
+            raise HTTPException(404, '页面不存在')
+        candidate = (frontend_dir / full_path).resolve()
+        try:
+            candidate.relative_to(frontend_dir)
+        except ValueError:
+            raise HTTPException(404, '页面不存在') from None
+        if candidate.is_file():
+            cache = 'public, max-age=31536000, immutable' if full_path.startswith('assets/') else 'no-cache'
+            return FileResponse(candidate, headers={'Cache-Control': cache})
+        return FileResponse(frontend_index, headers={'Cache-Control': 'no-cache'})

@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 .venv/
 __pycache__/
 *.py[cod]
@@ -21,6 +22,10 @@ coverage/
 *.bak
 *.sql
 *.dump
+backups/
+*.pem
+*.key
+*.crt
 htmlcov/
 playwright-report/
 test-results/
