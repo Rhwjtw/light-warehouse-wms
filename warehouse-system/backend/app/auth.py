@@ -41,6 +41,7 @@ def verify_password(password: str, encoded: str) -> bool:
 
 
 DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
+# 用户不存在时也执行同成本的密码校验，减少通过响应耗时枚举账号的差异。
 
 
 def audit(session, user_id, action, entity_type, entity_id=None, details=None):
@@ -76,6 +77,7 @@ def current_user(session: SessionDep, credentials: Annotated[HTTPAuthorizationCr
         payload = jwt.decode(credentials.credentials, secret(), algorithms=['HS256'], audience='warehouse',
                              issuer='warehouse-api', options={'require': ['exp', 'iat', 'sub', 'ver']})
         user = session.get(User, int(payload['sub']))
+        # 每次请求核对账号状态和 token_version，使停用、改密、退出能立即撤销已签发令牌。
         if user is None or not user.is_active or user.deleted_at or user.token_version != payload['ver']:
             raise ValueError('revoked')
     except (jwt.PyJWTError, ValueError, TypeError, KeyError):
@@ -92,6 +94,7 @@ def require_admin(user, session, *, serialize_users=False):
         session.scalar(select(Role).where(Role.code == 'admin').with_for_update())
         session.refresh(user)
     if not user.is_active or user.deleted_at or session.get(Role, user.role_id).code != 'admin':
+        # 前端隐藏菜单仅改善体验，真正的权限边界必须在每个写接口的服务端执行。
         raise HTTPException(403, '仅管理员可以执行此操作')
 
 

@@ -50,6 +50,7 @@ def material_rows(session, order_id: int):
 
 
 def material_data(row: ProductionOrderMaterial) -> dict:
+    # 当前实际净领用始终按三类独立累计量计算，退料只抵减实际消耗，不抹掉原领补料事实。
     net = row.issued_quantity + row.supplemented_quantity - row.returned_quantity
     return {
         'id': row.id,
@@ -129,6 +130,7 @@ def order_data(session, order: ProductionOrder, *, include_details: bool = True)
 
 def create_order(session, user, payload) -> dict:
     require_admin(user, session)
+    # 同时锁定成品和当前 ACTIVE BOM，避免创建过程中档案单位或配方状态被并发修改。
     product = session.scalar(select(FinishedProduct).where(
         FinishedProduct.id == payload.finished_product_id,
         FinishedProduct.deleted_at.is_(None), FinishedProduct.is_active.is_(True),
@@ -159,6 +161,7 @@ def create_order(session, user, payload) -> dict:
             context.prec = 60
             bom_total = storable_quantity(item.quantity_per_unit * payload.planned_quantity, '计划理论需求')
         base_total = convert_quantity(session, bom_total, item.unit, material.unit)
+        # 快照同时保留 BOM 原单位用量和原料库存单位理论量，后续换配方不会影响本生产单。
         snapshots.append((item, material, base_total))
 
     order = ProductionOrder(
@@ -176,6 +179,7 @@ def create_order(session, user, payload) -> dict:
     )
     session.add(order)
     session.flush()
+    # 先取得数据库主键再组成业务单号，避免依赖并发下不可靠的“当天最大号”。
     order.order_no = f'PO{business_today():%Y%m%d}{order.id:06d}'
     for item, material, base_total in snapshots:
         session.add(ProductionOrderMaterial(
@@ -228,6 +232,7 @@ def cancel_order(session, user, identity: int) -> dict:
         .where(ProductionOrderMaterial.production_order_id == order.id)
     )
     if count:
+        # 发生过领补退后已存在库存事实，简单取消无法安全反冲，因此必须拒绝。
         raise HTTPException(409, '该生产单已发生物料业务，不能直接取消')
     order.status = 'cancelled'
     order.updated_at = utcnow()
@@ -273,6 +278,7 @@ def create_inventory_transaction(session, **values):
 
 def post_material(session, user, order_id: int, payload, kind: str) -> dict:
     role = session.get(Role, user.role_id)
+    # 车间可登记补料和退料，但正常领料仍限管理员/仓库；正式结算权限另行校验。
     allowed = ('admin', 'warehouse', 'workshop') if kind in ('supplement', 'return') else ('admin', 'warehouse')
     if role is None or role.code not in allowed:
         raise HTTPException(403, '当前角色不能办理此生产物料操作')
@@ -296,6 +302,7 @@ def post_material(session, user, order_id: int, payload, kind: str) -> dict:
             raise HTTPException(409, '请求标识已使用且内容或操作者不同，请刷新后重试')
         return posting_result(session, document)
 
+    # 固定按生产单、生产单原料、批次 ID 顺序加锁，既冻结完工竞态，也降低多批次操作死锁风险。
     order = find_order(session, order_id, lock=True)
     if order.status not in ('ready', 'in_progress'):
         raise HTTPException(409, '该生产单当前状态不能办理物料业务')
@@ -334,6 +341,7 @@ def post_material(session, user, order_id: int, payload, kind: str) -> dict:
         quantity = convert_quantity(session, allocation.quantity, payload.unit, material.unit)
         total = storable_quantity(total + quantity, '本次物料数量')
         if kind in ('issue', 'supplement'):
+            # 页面上的 FEFO 结果只是建议；提交时仍必须重新检查有效期、档案状态和实时余额。
             supplier = session.get(Supplier, batch.supplier_id)
             location = session.get(Location, batch.location_id)
             if (batch.expiry_date < business_today() or supplier is None or not supplier.is_active or supplier.deleted_at
@@ -342,6 +350,7 @@ def post_material(session, user, order_id: int, payload, kind: str) -> dict:
             if quantity > batch.remaining_quantity:
                 raise HTTPException(409, f'批次 {batch.batch_no} 库存不足')
         else:
+            # 退料只能回到本生产单实际领过的原批次，上限按该批次领料+补料-历史退料计算。
             issued = session.scalar(select(func.coalesce(func.sum(MaterialIssueRecord.quantity), 0)).where(
                 MaterialIssueRecord.order_material_id == order_material.id,
                 MaterialIssueRecord.batch_id == batch.id,
@@ -370,6 +379,7 @@ def post_material(session, user, order_id: int, payload, kind: str) -> dict:
         notes=payload.notes,
     )
     try:
+        # request_id 唯一键处理并发双击；冲突时仅回滚 savepoint，再按请求指纹决定重放或拒绝。
         with session.begin_nested():
             session.add(document)
             session.flush()
@@ -380,6 +390,7 @@ def post_material(session, user, order_id: int, payload, kind: str) -> dict:
         raise
 
     for allocation, batch, quantity in converted:
+        # 每个批次都同时写事实明细和前/变动/后流水，任何一行失败均由外层请求事务整体回滚。
         before = batch.remaining_quantity
         change = quantity if kind == 'return' else -quantity
         batch.remaining_quantity += change
@@ -408,6 +419,7 @@ def post_material(session, user, order_id: int, payload, kind: str) -> dict:
         )
 
     if kind == 'issue':
+        # 汇总字段用于快速展示，结算时仍会从不可变的逐批次事实明细重新汇总并交叉校验。
         order_material.issued_quantity = storable_quantity(order_material.issued_quantity + total, '累计领料数量')
     elif kind == 'supplement':
         order_material.supplemented_quantity = storable_quantity(order_material.supplemented_quantity + total, '累计补料数量')
@@ -455,6 +467,7 @@ def fefo_suggestion(session, order_id: int, material_id: int, requested_quantity
     batches = []
     available = Decimal('0')
     for batch in rows:
+        # 按统一 FEFO 顺序依次拆分目标数量；库存不足时仍返回可用批次，并用 fully_satisfied 明示缺口。
         available += batch.remaining_quantity
         suggested = min(left, batch.remaining_quantity) if left > 0 else Decimal('0')
         if suggested > 0:

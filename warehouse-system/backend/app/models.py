@@ -71,6 +71,7 @@ class Location(Identity, Timestamps, Archive, Base):
 
 
 class RawMaterial(Identity, Timestamps, Archive, Base):
+    # 原材料档案只保存计量单位和最低库存阈值；实时库存必须由批次余额汇总，不能写回本表。
     __tablename__ = 'raw_materials'
     code: Mapped[str] = mapped_column(String(40), unique=True)
     name: Mapped[str] = mapped_column(String(120), index=True)
@@ -82,6 +83,7 @@ class RawMaterial(Identity, Timestamps, Archive, Base):
 
 
 class FinishedProduct(Identity, Timestamps, Archive, Base):
+    # 成品单位参与 BOM、生产单和库存记账，业务发生后不能被随意改写；“盒”只是默认值。
     __tablename__ = 'finished_products'
     code: Mapped[str] = mapped_column(String(40), unique=True)
     name: Mapped[str] = mapped_column(String(120), index=True)
@@ -93,6 +95,7 @@ class FinishedProduct(Identity, Timestamps, Archive, Base):
 
 
 class MaterialBatch(Identity, Timestamps, Base):
+    # 原材料库存的实际承载实体。同一原料、批号、供应商和库位共同确定一个可累加入库的批次。
     __tablename__ = 'material_batches'
     material_id: Mapped[int] = mapped_column(ForeignKey('raw_materials.id'))
     batch_no: Mapped[str] = mapped_column(String(80))
@@ -115,6 +118,7 @@ class MaterialBatch(Identity, Timestamps, Base):
 
 
 class BomHeader(Identity, Timestamps, Archive, Base):
+    # BOM 头保存成品、版本和状态；具体的“每一成品单位用料”由 BomItem 表达。
     __tablename__ = 'bom_headers'
     product_id: Mapped[int] = mapped_column(ForeignKey('finished_products.id'), index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -132,6 +136,7 @@ class BomHeader(Identity, Timestamps, Archive, Base):
 
 
 class BomItem(Identity, Timestamps, Base):
+    # quantity_per_unit 使用本行 unit，生产单创建时会同时保存该原始配方单位和换算后的库存单位数量。
     __tablename__ = 'bom_items'
     bom_id: Mapped[int] = mapped_column(ForeignKey('bom_headers.id'), index=True)
     material_id: Mapped[int] = mapped_column(ForeignKey('raw_materials.id'), index=True)
@@ -143,6 +148,7 @@ class BomItem(Identity, Timestamps, Base):
 
 
 class ProductionOrder(Identity, Timestamps, Base):
+    # 生产单保存成品名称、BOM 版本和单位快照，保证之后修改档案或配方不会改写历史生产事实。
     __tablename__ = 'production_orders'
     order_no: Mapped[str] = mapped_column(String(48), unique=True)
     product_id: Mapped[int] = mapped_column(ForeignKey('finished_products.id'), index=True)
@@ -164,6 +170,7 @@ class ProductionOrder(Identity, Timestamps, Base):
 
 
 class ProductionOrderMaterial(Identity, Timestamps, Base):
+    # 每行是生产单创建时固化的一种原料快照，也是领料、补料、退料汇总及最终损耗结算的载体。
     __tablename__ = 'production_order_materials'
     production_order_id: Mapped[int] = mapped_column(ForeignKey('production_orders.id'), index=True)
     material_id: Mapped[int] = mapped_column(ForeignKey('raw_materials.id'), index=True)
@@ -208,6 +215,7 @@ class StockDocument(Identity, Base):
 
 
 class MaterialMovement(Identity, Base):
+    # 普通原料入/出库的单据明细；quantity 已统一为库存单位，input_* 保留操作员原始输入。
     __tablename__ = 'material_movements'
     document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), index=True)
     batch_id: Mapped[int] = mapped_column(ForeignKey('material_batches.id'), index=True)
@@ -218,6 +226,7 @@ class MaterialMovement(Identity, Base):
 
 
 class MaterialIssueRecord(Identity, Base):
+    # 生产领料、补料、退料的逐批次事实明细，不能只用 ProductionOrderMaterial 上的汇总字段替代。
     __tablename__ = 'material_issue_records'
     document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), index=True)
     order_material_id: Mapped[int] = mapped_column(ForeignKey('production_order_materials.id'), index=True)
@@ -247,6 +256,7 @@ class MaterialRequest(Identity, Timestamps, Base):
 
 
 class FinishedBatch(Identity, Timestamps, Base):
+    # 第一版不向用户暴露成品批次：每个成品使用一条 aggregate 行承载普通入出库和生产入库余额。
     __tablename__ = 'finished_batches'
     product_id: Mapped[int] = mapped_column(ForeignKey('finished_products.id'), index=True)
     batch_no: Mapped[str] = mapped_column(String(80))
@@ -267,6 +277,7 @@ class FinishedBatch(Identity, Timestamps, Base):
 
 
 class FinishedReceipt(Identity, Base):
+    # production_order_id 唯一，数据库层防止同一生产单被重复完工入库。
     __tablename__ = 'finished_receipts'
     document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), unique=True)
     production_order_id: Mapped[int | None] = mapped_column(ForeignKey('production_orders.id'), unique=True)
@@ -284,6 +295,7 @@ class FinishedOutbound(Identity, Base):
 
 
 class InventoryTransaction(Identity, Base):
+    # 原料与成品共用的不可随意修改库存流水；前量、变动量、后量必须形成可复核的恒等式。
     __tablename__ = 'inventory_transactions'
     document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), index=True)
     material_batch_id: Mapped[int | None] = mapped_column(ForeignKey('material_batches.id'), index=True)
@@ -304,6 +316,7 @@ class InventoryTransaction(Identity, Base):
 
 
 class WarningRule(Identity, Timestamps, Base):
+    # 保存临期天数阈值；预警状态由查询时的业务日期和当前正库存实时计算，不持久化到批次。
     __tablename__ = 'warning_rules'
     code: Mapped[str] = mapped_column(String(40), unique=True)
     name: Mapped[str] = mapped_column(String(80))
@@ -320,6 +333,7 @@ class SystemSetting(Base):
 
 
 class OperationLog(Identity, Base):
+    # 业务审计与对应库存事务一起提交；用户名和描述快照用于账号改名后仍可追溯当时操作。
     __tablename__ = 'operation_logs'
     user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), index=True)
     username_snapshot: Mapped[str | None] = mapped_column(String(64))

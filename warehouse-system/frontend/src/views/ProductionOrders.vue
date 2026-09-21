@@ -27,6 +27,7 @@ watch(actualQuantity, () => { settlement.value = null })
 async function previewSettlement() {
   settlement.value = null; settlementError.value = ''; settling.value = true
   const quantity = actualQuantity.value
+  // 只接受仍对应当前输入数量的响应，避免用户改数后显示上一笔试算结果。
   try {
     const result = (await api.post(`/production-orders/${current.value.id}/settlement-preview`, { actual_quantity: quantity })).data
     if (actualQuantity.value === quantity) settlement.value = result
@@ -37,6 +38,7 @@ async function finishProduction() {
   if (!settlement.value || completing.value) return
   completing.value = true; settlementError.value = ''
   try {
+    // 正式完成会由后端重新汇总领补退、重算损耗并一次性生产入库，不能只信页面预览。
     current.value = (await api.post(`/production-orders/${current.value.id}/complete`, { actual_quantity: actualQuantity.value })).data
     completeVisible.value = false; ElMessage.success('生产已完成，成品已入库'); await load()
   } catch (e) { settlementError.value = e.message; settlement.value = null }
@@ -101,6 +103,7 @@ async function calculatePreview() {
   }
   previewLoading.value = true; error.value = ''
   try {
+    // 新建前的算料仅供核对；生产单创建时后端会再次读取并冻结当时的 ACTIVE BOM。
     preview.value = (await api.post('/boms/calculate', {
       finished_product_id: createForm.finished_product_id,
       planned_quantity: createForm.planned_quantity,
@@ -145,6 +148,7 @@ async function cancelOrder() {
   } catch (e) { if (e !== 'cancel' && e !== 'close') error.value = e.message }
 }
 function returnCandidates(material) {
+  // 前端按逐笔记录计算每批最多可退量；服务端仍会基于数据库事实再次校验上限。
   const map = new Map()
   for (const record of current.value.material_records.filter(row => row.order_material_id === material.id)) {
     const existing = map.get(record.batch_id) || { batch_id: record.batch_id, batch_no: record.batch_no, remaining_quantity: '—', expiry_date: '原领料批次', max_return: '0' }
@@ -166,6 +170,7 @@ async function loadCandidates() {
   try {
     const params = validQuantity(action.desired) ? { quantity: action.desired } : {}
     const result = (await api.get(`/production-orders/${current.value.id}/materials/${action.material.material_id}/fefo-suggestion`, { params })).data
+    // FEFO 返回可拆分的建议批次，用户可以调整，但过期、余额和档案状态以提交时服务端复核为准。
     if (!action.desired && action.kind === 'issue' && Number(result.remaining_to_issue) > 0) action.desired = result.remaining_to_issue
     const suggestions = new Map(result.suggestions.map(row => [row.batch_id, row.quantity]))
     action.allocations = result.batches.map(row => ({ ...row, quantity: suggestions.get(row.id) || '' }))
@@ -191,6 +196,7 @@ async function submitAction() {
   actionSaving.value = true; error.value = ''
   try {
     const payload = { order_material_id: action.material.id, unit: action.unit, allocations, notes: action.notes || null }
+    // 同一弹窗内失败重试沿用请求标识；修改批次/数量/备注后 postingRequest 会生成新标识。
     await api.post(`/production-orders/${current.value.id}/${action.kind}`, postingRequest(action, payload, requestId))
     actionVisible.value = false; ElMessage.success(`${actionNames[action.kind]}成功`)
     await refreshDetail(); await load()

@@ -17,6 +17,7 @@ from app.models import (RawMaterial, Supplier, Location, Role, MaterialBatch,
 from app.unit_conversion import MAX_QUANTITY, convert_quantity
 
 def business_today():
+    # 有效期按配置的业务时区比较自然日，避免 UTC 跨日导致“今天到期”被提前判过期。
     return datetime.now(ZoneInfo(get_settings().business_timezone)).date()
 
 
@@ -34,6 +35,7 @@ def fefo_conditions(material_id: int):
 
 
 def fefo_order():
+    # 先到期先出；同到期日再按实际收货时间和主键稳定排序。
     return (MaterialBatch.expiry_date, MaterialBatch.received_at, MaterialBatch.id)
 
 
@@ -57,6 +59,7 @@ def post_material(session, user, payload, kind):
     if session.get(Role, user.role_id).code not in ('admin', 'warehouse'):
         raise HTTPException(403, '仅管理员和仓库人员可以操作库存')
     content = payload.model_dump(mode='json', exclude={'request_id'})
+    # 请求指纹排除 request_id 本身；相同标识只有在操作者、类型和业务内容都一致时才可安全重放。
     content['quantity'] = format(payload.quantity.normalize(), 'f')
     fingerprint = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -97,6 +100,7 @@ def post_material(session, user, payload, kind):
             MaterialBatch.supplier_id == payload.supplier_id, MaterialBatch.location_id == payload.location_id
         ).with_for_update())
         if batch:
+            # 同一业务批次可多次入库，但日期和库存单位必须完全一致，不能把不同货物静默混批。
             if (batch.unit, batch.production_date, batch.expiry_date) != (material.unit, payload.production_date, payload.expiry_date):
                 raise HTTPException(409, '同批号、供应商及库位的单位或日期不一致')
             before = batch.remaining_quantity
@@ -113,6 +117,7 @@ def post_material(session, user, payload, kind):
             session.add(batch)
         change = quantity
     else:
+        # 普通出库锁定批次后重新检查归属、单位、关联档案、有效期和余额，不信任页面选择时的旧状态。
         batch = session.scalar(select(MaterialBatch).where(MaterialBatch.id == payload.batch_id).with_for_update())
         if not batch or batch.material_id != material.id:
             raise HTTPException(422, '批次不存在或不属于所选原料')
@@ -128,6 +133,7 @@ def post_material(session, user, payload, kind):
         batch.remaining_quantity -= quantity
         change = -quantity
     session.flush()
+    # 单据明细、批次余额、库存流水和审计全部只 flush；由请求级 SessionDep 在最外层统一提交或回滚。
     session.add(MaterialMovement(document_id=document.id, batch_id=batch.id, quantity=quantity,
                                  input_quantity=payload.quantity, input_unit=payload.unit))
     session.flush()

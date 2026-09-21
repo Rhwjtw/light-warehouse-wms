@@ -5,6 +5,7 @@ const filters = reactive({ q: '', status: '', date_from: '', date_to: '' })
 const rows = ref([]), total = ref(0), page = ref(1), loading = ref(false), error = ref(''), rules = ref({})
 const names = { EXPIRED: '已过期', URGENT: '严重临期', WARNING: '一般临期', NORMAL: '正常' }
 const colors = { EXPIRED: 'danger', URGENT: 'warning', WARNING: 'primary', NORMAL: 'success' }
+// 状态和剩余天数由后端按业务时区、实时阈值和正库存统一计算，前端只负责筛选与展示。
 async function load(reset = false) {
   if (reset) page.value = 1
   loading.value = true; error.value = ''

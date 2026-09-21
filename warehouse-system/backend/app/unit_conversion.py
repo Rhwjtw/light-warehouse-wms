@@ -14,6 +14,7 @@ def get_compatible_units(session, source: str, target: str) -> tuple[Unit, Unit]
     if not source_unit or not target_unit:
         raise HTTPException(422, '单位不存在或不受支持')
     if source_unit.dimension != target_unit.dimension:
+        # 质量、体积、计数之间没有密度或包装换算规则，禁止根据名称猜测转换关系。
         raise HTTPException(422, f'单位不兼容：不能从 {source} 换算为 {target}')
     return source_unit, target_unit
 
@@ -31,6 +32,7 @@ def convert_quantity(session, quantity: Decimal, source: str, target: str, *, re
         if result <= 0:
             raise HTTPException(422, '数量必须大于0')
         if require_six_places and (result > MAX_QUANTITY or result != result.quantize(Decimal('0.000001'))):
+            # 要写入 DECIMAL(20,6) 的数量必须可精确保存；宁可拒绝，也不静默四舍五入库存。
             raise HTTPException(422, '换算后数量超出范围或超过六位小数')
         return result
 

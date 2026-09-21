@@ -23,6 +23,7 @@ def losses(user: UserDep, session: SessionDep,
            page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, '开始日期不能晚于结束日期')
+    # 损耗页读取完工时固化的快照；不能用后来修改的 BOM 或当前库存重新覆盖历史结算。
     query = select(Material.id, Order.id.label('production_order_id'), Order.order_no,
                    Order.product_name_snapshot.label('product_name'), Order.actual_quantity,
                    Order.unit.label('product_unit'), Material.material_name_snapshot.label('material_name'),

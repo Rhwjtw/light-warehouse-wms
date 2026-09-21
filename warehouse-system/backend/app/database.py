@@ -35,10 +35,12 @@ class Base(DeclarativeBase):
 
 engine = create_engine(get_settings().database_url, pool_pre_ping=True, pool_recycle=1800,
                        connect_args={'connect_timeout': 5}, isolation_level='READ COMMITTED')
+# 库存写入依靠显式行锁和唯一键处理并发；READ COMMITTED 避免长事务持有不必要的历史快照。
 
 
 @event.listens_for(engine, 'connect')
 def set_mysql_timezone(dbapi_connection, connection_record):
+    # 所有连接统一用 UTC 读写 DATETIME，业务自然日仅在明确的业务时区边界处转换。
     with dbapi_connection.cursor() as cursor:
         cursor.execute("SET time_zone = '+00:00'")
 

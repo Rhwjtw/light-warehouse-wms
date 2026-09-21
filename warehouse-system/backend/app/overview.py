@@ -49,6 +49,7 @@ def date_bounds(start, end):
     if end == date.max or start == date.min:
         raise HTTPException(422, '日期超出支持范围')
     zone = ZoneInfo(get_settings().business_timezone)
+    # 将业务自然日转换为左闭右开的 UTC 区间，避免结束日 23:59:59 的精度遗漏。
     return (datetime.combine(start, time.min, zone).astimezone(timezone.utc) if start else None,
             datetime.combine(end + timedelta(days=1), time.min, zone).astimezone(timezone.utc) if end else None)
 
@@ -66,7 +67,7 @@ def write_settings(payload: ExpirySettings, user: UserDep, session: SessionDep):
     before = rule_data(rows)
     rows['expiry_near'].days = payload.urgent_expiry_days
     rows['expiry_early'].days = payload.warning_expiry_days
-    # These two required rules are always enabled by the first-version settings form.
+    # 第一版设置页管理的两条必需规则始终启用，避免阈值存在但查询口径被局部关闭。
     for row in rows.values():
         row.is_active = True
     audit(session, user.id, 'update_settings', 'warning_rules', details={'before': before, 'after': payload.model_dump()})
@@ -74,6 +75,7 @@ def write_settings(payload: ExpirySettings, user: UserDep, session: SessionDep):
 
 
 def expiry_expression(today, rules):
+    # 到期当天仍有效：早于今天才是过期；0～严重阈值为严重临期，之后至一般阈值为一般临期。
     return case((Batch.expiry_date < today, 'EXPIRED'),
                 (Batch.expiry_date <= today + timedelta(days=rules['expiry_near'].days), 'URGENT'),
                 (Batch.expiry_date <= today + timedelta(days=rules['expiry_early'].days), 'WARNING'),
@@ -95,6 +97,7 @@ def expiry(user: UserDep, session: SessionDep, q: str = Query('', max_length=120
         .join(RawMaterial, RawMaterial.id == Batch.material_id)\
         .join(Location, Location.id == Batch.location_id).join(Supplier, Supplier.id == Batch.supplier_id)\
         .where(Batch.remaining_quantity > 0)
+    # 零余额批次没有可处置库存，不进入过期或临期预警。
     query = query.where(state == status) if status else query.where(state != 'NORMAL')
     if q.strip():
         query = query.where(RawMaterial.name.contains(q.strip(), autoescape=True))
@@ -114,6 +117,7 @@ def summary(user: UserDep, session: SessionDep):
     def count(model, *conditions):
         return session.scalar(select(func.count()).select_from(model).where(*conditions))
     stock = select(Batch.material_id, func.sum(Batch.remaining_quantity).label('quantity')).group_by(Batch.material_id).subquery()
+    # 最低库存按同一种原料的全部批次余额汇总后比较；min_stock=0 表示未启用该项预警。
     low = session.scalar(select(func.count()).select_from(RawMaterial).outerjoin(stock, stock.c.material_id == RawMaterial.id)
                          .where(RawMaterial.deleted_at.is_(None), RawMaterial.min_stock > 0,
                                 func.coalesce(stock.c.quantity, 0) < RawMaterial.min_stock))
@@ -127,7 +131,7 @@ def summary(user: UserDep, session: SessionDep):
                                        Batch.expiry_date <= today + timedelta(days=rules['expiry_near'].days)),
                   warning_batches=count(Batch, Batch.remaining_quantity > 0, Batch.expiry_date >= today,
                                         Batch.expiry_date <= today + timedelta(days=rules['expiry_early'].days)))
-    # Never sum kilograms, litres and pieces together. Today means actual posting time.
+    # kg、L、个等单位不能相加；今日统计按真实记账时间分单位聚合，而不是按单据补录日期混算。
     groups = session.execute(select(Ledger.kind, Ledger.unit, func.sum(Ledger.change_quantity))
                              .where(Ledger.created_at >= start, Ledger.created_at < end).group_by(Ledger.kind, Ledger.unit)).all()
     buckets = {key: {} for key in ('material_in', 'material_out', 'finished_in', 'finished_out')}

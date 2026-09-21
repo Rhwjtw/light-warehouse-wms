@@ -33,6 +33,7 @@ def page_result(session, query, page, page_size):
 
 
 def batch_query(q, material_id):
+    # 批次列表包含全部余额用于追溯；只有专用 FEFO 接口才进一步排除过期、零库存和失效档案。
     query = select(MaterialBatch.id, MaterialBatch.material_id, RawMaterial.code.label('material_code'),
                    RawMaterial.name.label('material_name'), MaterialBatch.batch_no,
                    MaterialBatch.received_quantity, MaterialBatch.remaining_quantity, MaterialBatch.unit,
@@ -59,12 +60,14 @@ def batches(user: UserDep, session: SessionDep, q: str = Query('', max_length=12
 def fefo(user: UserDep, session: SessionDep, material_id: int = Query(..., gt=0),
          page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     query = batch_query('', material_id).where(*fefo_conditions(material_id)).order_by(*fefo_order())
+    # 此结果是页面选批建议，实际出库/领料仍会在写事务中锁行并再次校验。
     return page_result(session, query, page, page_size)
 
 
 @router.get('/material-stock', response_model=Envelope)
 def stock(user: UserDep, session: SessionDep, q: str = Query('', max_length=120),
           page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
+    # 汇总库存包含该原料所有批次（包括已过期批次）；预警和可用库存使用各自更严格的口径。
     query = select(RawMaterial.id, RawMaterial.code, RawMaterial.name, RawMaterial.unit,
                    func.coalesce(func.sum(MaterialBatch.remaining_quantity), 0).label('remaining_quantity'))
     query = query.outerjoin(MaterialBatch, MaterialBatch.material_id == RawMaterial.id).where(RawMaterial.deleted_at.is_(None))
@@ -79,6 +82,7 @@ def transactions(user: UserDep, session: SessionDep, q: str = Query('', max_leng
                  material_id: int | None = Query(None, gt=0), batch_id: int | None = Query(None, gt=0),
                  kind: str | None = Query(None, pattern='^(material_receipt|material_outbound|issue|supplement|return)$'),
                  page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
+    # 统一流水同时关联普通出入库明细和生产领补退明细，便于从库存变化追溯到原始输入和生产单。
     query = select(InventoryTransaction.id, InventoryTransaction.created_at, InventoryTransaction.kind,
                    MaterialBatch.material_id, RawMaterial.code.label('material_code'), RawMaterial.name.label('material_name'),
                    MaterialBatch.id.label('batch_id'), MaterialBatch.batch_no, InventoryTransaction.unit,

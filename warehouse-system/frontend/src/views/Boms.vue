@@ -43,6 +43,7 @@ function selectedMaterial(id) { return materials.value.find(row => row.id === id
 function syncProduct() { form.product_unit = selectedProduct(form.product_id)?.unit || '' }
 function syncPreviewProduct() { preview.product_unit = selectedProduct(preview.finished_product_id)?.unit || '' }
 function compatibleUnits(item) {
+  // 下拉框只展示同维度单位以减少误选；真正的跨维度拒绝仍由服务端统一换算模块负责。
   const material = selectedMaterial(item.material_id)
   const source = units.value.find(unit => unit.code === material?.unit)
   return source ? units.value.filter(unit => unit.dimension === source.dimension) : []
@@ -119,6 +120,7 @@ async function calculate() {
   if (!preview.finished_product_id || !positiveDecimal.test(String(preview.planned_quantity))) return previewError.value = '请选择成品并填写大于0的计划数量'
   previewLoading.value = true
   try {
+    // 该接口只做理论用量预览，不创建生产单，也不会生成库存流水。
     previewResult.value = (await api.post('/boms/calculate', {
       finished_product_id: preview.finished_product_id, planned_quantity: String(preview.planned_quantity),
     })).data

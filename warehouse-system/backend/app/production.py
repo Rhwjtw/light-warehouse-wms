@@ -22,6 +22,7 @@ router = APIRouter(prefix='/api/production-orders', tags=['生产单'])
 
 @router.put('/{identity}/actual-quantity', response_model=Envelope)
 def register_actual(identity: int, payload: ProductionCompleteInput, user: UserDep, session: SessionDep):
+    # 登记实际产量只保存车间上报值，不结算、不改变成品库存；正式完工仍由管理员/仓库执行。
     if session.get(Role, user.role_id).code not in ('admin', 'warehouse', 'workshop'):
         raise HTTPException(403, '当前角色不能登记产量')
     order = find_order(session, identity, lock=True)
@@ -35,11 +36,13 @@ def register_actual(identity: int, payload: ProductionCompleteInput, user: UserD
 
 @router.post('/{identity}/settlement-preview', response_model=Envelope)
 def preview(identity: int, payload: ProductionCompleteInput, user: UserDep, session: SessionDep):
+    # 预览与正式结算共用公式和权限，但不会持久化任何计算结果。
     return Envelope(data=settlement_preview(session, user, identity, payload))
 
 
 @router.post('/{identity}/complete', response_model=Envelope)
 def complete(identity: int, payload: ProductionCompleteInput, user: UserDep, session: SessionDep):
+    # 完成接口在一个事务中固化损耗、生成唯一生产入库并冻结生产单。
     return Envelope(data=complete_order(session, user, identity, payload))
 
 

@@ -12,6 +12,7 @@ class Envelope(BaseModel):
 
 
 class InputModel(BaseModel):
+    # 禁止额外字段，避免客户端把余额、汇总量等服务端计算字段混入写请求。
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
 
 
@@ -23,6 +24,7 @@ Password = Annotated[str, StringConstraints(strip_whitespace=False, min_length=1
 
 
 def exact_decimal(value):
+    # 库存数量只接受十进制字符串/Decimal/整数；拒绝 float，避免二进制浮点误差进入账务。
     if isinstance(value, (float, bool)):
         raise ValueError('数量请使用十进制字符串，不要使用浮点数')
     return value

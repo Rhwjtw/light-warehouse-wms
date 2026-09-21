@@ -12,6 +12,7 @@ router = APIRouter(prefix='/api', tags=['成品库存'])
 
 
 def inventory_query():
+    # 第一版对外呈现成品汇总库存，不暴露内部 __aggregate__ 库存行。
     balances = select(FinishedBatch.product_id, func.sum(FinishedBatch.remaining_quantity).label('quantity')).group_by(FinishedBatch.product_id).subquery()
     times = select(FinishedBatch.product_id,
                    func.max(case((InventoryTransaction.kind == 'finished_receipt', InventoryTransaction.created_at))).label('last_receipt_at'),
@@ -61,6 +62,7 @@ def records_query(kind=None, q='', product_id=None):
 
 
 def register_records(path, kind):
+    # 普通成品入库和出库共享同一组列表/详情接口；生产入库不会经过这里，而由完工结算调用服务层。
     def create(payload: FinishedStockInput, user: UserDep, session: SessionDep):
         return Envelope(data=post_finished(session, user, payload, kind))
 

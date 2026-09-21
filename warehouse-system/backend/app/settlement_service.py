@@ -14,6 +14,7 @@ from app.unit_conversion import convert_quantity, MAX_QUANTITY
 
 
 def loss_values(theoretical, actual):
+    # 损耗可为负数；理论量为零时损耗率为空，不能除零，也不能把异常差异强制归零。
     with localcontext() as context:
         context.prec = 60
         loss = actual - theoretical
@@ -44,6 +45,7 @@ def prepare(session, user, identity, actual_quantity):
         raise HTTPException(409, '生产单至少需要一次有效领料或补料记录')
     results = []
     for row in rows:
+        # 实际用量以逐笔事实重新汇总：领料 + 补料 - 退料；汇总字段只用于一致性校验。
         issued, supplemented, returned = (totals.get((row.id, kind), Decimal('0'))
                                            for kind in ('issue', 'supplement', 'return'))
         actual = issued + supplemented - returned
@@ -54,6 +56,7 @@ def prepare(session, user, identity, actual_quantity):
         with localcontext() as context:
             context.prec = 60
             raw = actual_quantity * row.quantity_per_unit
+        # 最终理论量必须用实际成品数量乘创建时冻结的 BOM 单位用量，不能沿用计划产量。
         theoretical = convert_quantity(session, raw, row.unit, row.base_unit) if raw else Decimal('0')
         loss, rate = loss_values(theoretical, actual)
         results.append({**material_data(row), 'final_theoretical_quantity': decimal_text(theoretical),
@@ -64,6 +67,7 @@ def prepare(session, user, identity, actual_quantity):
 
 
 def preview(session, user, identity, payload):
+    # 预览复用正式结算的校验和公式，但只返回计算结果，不写产量、库存、流水或结算字段。
     return prepare(session, user, identity, payload.actual_quantity)[2]
 
 
@@ -79,6 +83,7 @@ def complete(session, user, identity, payload):
         quantity=order.actual_quantity, unit=order.unit, business_date=business_today(),
         business_type='production', reference_no=order.order_no,
     ), 'finished_receipt', production_order=order)
+    # 成品入库、结算字段、订单状态和审计共享同一个请求事务，任一步失败都会整体回滚。
     order.status = 'completed'
     order.completed_at = order.updated_at = utcnow()
     audit(session, user.id, 'complete_production_order', 'production_orders', order.id,

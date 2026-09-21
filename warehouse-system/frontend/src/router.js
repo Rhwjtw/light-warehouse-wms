@@ -35,6 +35,7 @@ const router = createRouter({
   ],
 })
 router.beforeEach(async to => {
+  // 页面守卫先恢复服务端确认过的登录态，再按角色过滤路由；它不是后端鉴权的替代品。
   if (to.meta.public) return true
   try {
     if (!await restoreAuth()) return { path: '/login', query: { redirect: to.fullPath } }

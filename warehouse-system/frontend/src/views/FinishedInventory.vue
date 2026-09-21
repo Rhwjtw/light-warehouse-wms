@@ -17,6 +17,7 @@ const error = ref(''), success = ref(null), rows = ref([]), loading = ref(false)
 const q = ref(''), page = ref(1), pageSize = ref(20), stockTab = ref('balance')
 const detail = ref(null), detailOpen = ref(false)
 let listGeneration = 0, optionGeneration = 0, selectionGeneration = 0, lastPayload = '', requestId = ''
+// 三类序号分别隔离列表、下拉选项和库存详情的异步响应，防止旧请求覆盖新选择。
 const endpoint = computed(() => isStock.value && stockTab.value === 'ledger' ? 'finished-transactions' : resource.value)
 const balanceView = computed(() => endpoint.value === 'finished-stock')
 const columns = computed(() => balanceView.value ? [
@@ -77,7 +78,9 @@ async function submit() {
     error.value = '请选择成品和业务日期，数量必须大于零且最多六位小数'; return
   }
   const payload = { ...form, unit: selected.value.unit, reference_no: form.reference_no.trim() || null, notes: form.notes.trim() || null }
+  // 成品单位始终取档案查询结果，页面不允许自行输入或猜测“盒”等固定单位。
   const signature = JSON.stringify(payload)
+  // 同内容连接中断重试沿用 requestId，后端幂等校验确保库存至多变化一次。
   if (!requestId || signature !== lastPayload) { requestId = crypto.randomUUID(); lastPayload = signature }
   saving.value = true
   try {

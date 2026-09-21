@@ -18,6 +18,7 @@ from app.unit_conversion import convert_quantity
 
 
 def reconcile(session):
+    # 本函数只读取并报告问题，不补流水、不改余额，也不把首条流水前量当作合法期初。
     problems = []
     def problem(kind, identity, reason):
         problems.append({'type': kind, 'id': identity, 'reason': reason})
@@ -40,6 +41,7 @@ def reconcile(session):
         batches = list(session.scalars(select(model)))
         counts[scope + '_batches'] = len(batches)
         for batch in batches:
+            # V1 每个批次从零开始，按流水顺序重放，逐行验证连续性后再与当前余额比较。
             balance = Decimal('0')
             received = Decimal('0')
             for row in chains.pop((scope, batch.id), []):
@@ -56,6 +58,7 @@ def reconcile(session):
         problem(scope, batch_id, 'ledger references missing batch')
 
     expected = Counter()
+    # 由各类业务明细推导“应有流水”，再与真实流水逐键比对，发现缺失、重复或正负号错误。
     for model, scope in [(MaterialMovement, 'material'), (MaterialIssueRecord, 'material'),
                          (FinishedReceipt, 'finished'), (FinishedOutbound, 'finished')]:
         for row in session.scalars(select(model)):
@@ -94,6 +97,7 @@ def reconcile(session):
             problem('production_material', row.id, 'posting totals differ')
         order = orders[row.production_order_id]
         if order.status in ('completed', 'received'):
+            # 已完工订单用冻结的 BOM 快照和真实领补退记录重新计算理论量、实际量及损耗。
             used = quantities[0] + quantities[1] - quantities[2]
             if order.actual_quantity is None or order.actual_quantity <= 0:
                 problem('production_order', order.id, 'invalid completed quantity')

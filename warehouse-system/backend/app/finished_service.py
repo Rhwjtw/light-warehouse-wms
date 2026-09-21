@@ -31,6 +31,7 @@ def post_finished(session, user, payload, kind, *, production_order=None):
     if session.get(Role, user.role_id).code not in ('admin', 'warehouse'):
         raise HTTPException(403, '仅管理员和仓库人员可以操作成品库存')
     if production_order is None and payload.business_type != 'normal':
+        # 普通接口不能伪造生产入库；生产入库只能由完工结算传入锁定后的生产单。
         raise HTTPException(422, '生产入库必须通过生产单完成操作')
     if production_order is not None and (
         kind != 'finished_receipt' or payload.business_type != 'production'
@@ -41,6 +42,7 @@ def post_finished(session, user, payload, kind, *, production_order=None):
     if payload.business_date > business_today():
         raise HTTPException(422, '入出库日期不能晚于业务今天')
     content = payload.model_dump(mode='json', exclude={'request_id'})
+    # 数量规范化后参与指纹，确保“1”和“1.0”被视为同一业务请求，同时仍拒绝内容冲突。
     content['quantity'] = format(payload.quantity.normalize(), 'f')
     fingerprint = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -82,6 +84,7 @@ def post_finished(session, user, payload, kind, *, production_order=None):
                              business_date=payload.business_date, business_type=payload.business_type,
                              reference_no=payload.reference_no, notes=payload.notes)
     try:
+        # savepoint 只处理 request_id 唯一键竞态；外层事务仍覆盖库存、明细、流水和审计的原子性。
         with session.begin_nested():
             session.add(document)
             session.flush()
@@ -91,6 +94,7 @@ def post_finished(session, user, payload, kind, *, production_order=None):
             return replay(existing)
         raise
     if batch is None:
+        # 首次记账创建每成品唯一的汇总库存行；后续普通入库和生产入库都累加到同一余额。
         batch = FinishedBatch(product_id=product.id, batch_no='__aggregate__', stock_scope='aggregate',
                               unit=product.unit, location_id=None, remaining_quantity=after)
         session.add(batch)

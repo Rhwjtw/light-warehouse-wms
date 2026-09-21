@@ -13,7 +13,7 @@ router = APIRouter(prefix='/api', tags=['BOM 配方'])
 
 
 def decimal_text(value: Decimal) -> str:
-    # normalize() uses the default 28-digit context and can round large previews.
+    # 不使用 normalize()：它会受默认 28 位上下文影响，可能把大数量试算结果意外舍入。
     value_text = format(value, 'f')
     return value_text.rstrip('0').rstrip('.') if '.' in value_text else value_text
 
@@ -39,6 +39,7 @@ def active_catalog_record(session, model, identity: int, label: str, *, lock: bo
 
 
 def validate_payload(session, payload: BomInput, *, current_id: int | None = None):
+    # 锁住成品可把“校验单一 ACTIVE”和写入串行化；数据库唯一约束继续兜住并发竞态。
     product = active_catalog_record(session, FinishedProduct, payload.product_id, '成品', lock=True)
     material_ids = [item.material_id for item in payload.items]
     if len(material_ids) != len(set(material_ids)):
@@ -129,6 +130,7 @@ def list_boms(user: UserDep, session: SessionDep, q: str = Query('', max_length=
 
 @router.post('/boms/calculate', response_model=Envelope)
 def calculate(payload: BomCalculateInput, user: UserDep, session: SessionDep):
+    # 试算只读取当前 ACTIVE BOM 并组装结果，不创建生产单、库存单据或流水，也不保存计算结果。
     product = session.scalar(select(FinishedProduct).where(
         FinishedProduct.id == payload.finished_product_id,
         FinishedProduct.deleted_at.is_(None), FinishedProduct.is_active.is_(True),
@@ -155,6 +157,7 @@ def calculate(payload: BomCalculateInput, user: UserDep, session: SessionDep):
             raise HTTPException(422, f'BOM原材料“{material.name}”已失效')
         get_compatible_units(session, item.unit, material.unit)
         with localcontext() as context:
+            # 先在 BOM 原单位中高精度相乘，再按原料档案单位换算，避免中间值精度损失。
             context.prec = 60
             total = item.quantity_per_unit * payload.planned_quantity
         suggested = normalize_quantity(session, total, item.unit, material.unit)
@@ -215,6 +218,7 @@ def update_bom(identity: int, payload: BomInput, user: UserDep, session: Session
     current_formula = [(row.material_id, row.quantity_per_unit, row.unit, row.sort_order, row.notes) for row in current_items]
     requested_formula = [(row.material_id, row.quantity_per_unit, row.unit, row.sort_order, row.notes) for row in payload.items]
     if referenced and (payload.product_id != bom.product_id or payload.version != bom.version or requested_formula != current_formula):
+        # 被生产单引用的版本已成为历史依据；改配方必须新建版本，避免历史理论用量失真。
         raise HTTPException(409, '该BOM已被生产单引用，只能停用或修改备注；配方变更请新建版本')
     if referenced:
         if payload.status == 'active':

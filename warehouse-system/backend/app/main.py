@@ -80,6 +80,7 @@ async def http_error(request, exc):
 
 @app.exception_handler(IntegrityError)
 async def integrity_error(request, exc):
+    # 数据库唯一键/外键冲突统一对外隐藏 SQL 和参数；请求事务会由 SessionDep 自动回滚。
     return error(409, 'DATA_CONFLICT', '编码或用户名已使用（包含已删除记录），或数据存在引用冲突')
 
 
@@ -106,6 +107,7 @@ def database_health():
             version = connection.execute(text('SELECT VERSION()')).scalar_one()
             revision = connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
         if revision != expected_revision:
+            # 连接成功不等于可接流量，迁移版本落后时明确返回未就绪。
             return error(503, 'MIGRATION_REQUIRED', '数据库版本落后，请先运行 Alembic 迁移')
         return Envelope(data={'status': 'ok', 'engine': 'MySQL', 'version': version, 'migration': revision})
     except SQLAlchemyError as exc:

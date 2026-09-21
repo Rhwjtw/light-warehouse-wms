@@ -17,6 +17,7 @@ const candidates = ref([]), candidatePage = ref(1), candidateTotal = ref(0)
 const saving = ref(false), error = ref(''), success = ref(null), rows = ref([]), total = ref(0), loading = ref(false)
 const query = ref(''), page = ref(1), pageSize = ref(20)
 let requestId = '', lastPayload = '', generation = 0, batchGeneration = 0
+// generation 令牌丢弃晚到的旧查询响应，避免快速切页/换原料时旧数据覆盖当前页面。
 const endpoint = computed(() => writePage.value ? 'material-transactions' : resource.value === 'batches' ? 'material-batches' : resource.value)
 const columns = computed(() => resource.value === 'material-stock' ? [
   ['code', '原料编码'], ['name', '原料名称'], ['remaining_quantity', '总库存（含过期）'], ['unit', '单位'],
@@ -58,6 +59,7 @@ async function loadBatches(selectDefault = false) {
   if (!form.material_id) { candidates.value = []; candidateTotal.value = 0; return }
   try {
     const result = await api.get('/material-fefo', { params: { material_id: form.material_id, page: candidatePage.value, page_size: 20 } })
+    // 页面默认选中 FEFO 第一批只是操作建议；服务端提交时仍会锁定批次并复核有效期和余额。
     if (ticket !== batchGeneration) return
     candidates.value = result.data.items; candidateTotal.value = result.data.total
     if (selectDefault) form.batch_id = candidates.value[0]?.id ?? null
@@ -83,6 +85,7 @@ async function submit() {
   if (receipt.value) Object.assign(payload, { batch_no: form.batch_no.trim(), production_date: form.production_date, expiry_date: form.expiry_date, supplier_id: form.supplier_id, location_id: form.location_id })
   else payload.batch_id = form.batch_id
   const signature = JSON.stringify(payload)
+  // 网络错误后保持原输入会沿用 requestId；修改任一业务字段则视为新操作并换新标识。
   if (signature !== lastPayload || !requestId) { requestId = crypto.randomUUID(); lastPayload = signature }
   saving.value = true
   try {
