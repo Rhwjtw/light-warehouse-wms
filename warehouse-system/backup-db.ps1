@@ -1,10 +1,11 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot 'backups'),
+    [string]$OutputDirectory = '',
     [string]$MySqlBin = ''
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $PSScriptRoot 'backups' }
 $envPath = Join-Path $PSScriptRoot 'backend/.env'
 $runtimeDir = Join-Path $PSScriptRoot '.runtime/production'
 
