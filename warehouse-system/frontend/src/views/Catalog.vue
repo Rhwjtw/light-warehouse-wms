@@ -2,8 +2,15 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Search } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
+import DataPanel from '../components/ui/DataPanel.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FilterBar from '../components/ui/FilterBar.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import TableSkeleton from '../components/ui/TableSkeleton.vue'
 
 const route = useRoute()
 const resource = computed(() => route.meta.resource)
@@ -83,18 +90,27 @@ watch(resource, async () => {
 </script>
 
 <template>
-  <div class="page-heading"><div><h1>{{ route.meta.title }}</h1><p>{{ admin ? '维护基础信息，已有业务引用的档案请使用停用。' : '当前角色可查看资料，修改请联系管理员。' }}</p></div><el-button v-if="admin" type="primary" @click="open('create')">新增{{ isUser ? '用户' : route.meta.title.replace('档案', '') }}</el-button></div>
-  <el-card shadow="never">
-    <el-form inline class="search-bar" @submit.prevent="search"><el-form-item label="搜索"><el-input v-model="query" :placeholder="isUser ? '用户名 / 姓名' : '编码 / 名称，支持模糊搜索'" clearable maxlength="120" @clear="search" /></el-form-item><el-form-item label="状态"><el-select v-model="status" style="width: 120px" @change="search"><el-option label="全部" value="all" /><el-option label="启用" value="active" /><el-option label="停用" value="inactive" /></el-select></el-form-item><el-form-item><el-button type="primary" native-type="submit">查询</el-button><el-button @click="query = ''; status = 'all'; search()">重置</el-button></el-form-item></el-form>
-    <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon />
-    <el-table v-loading="loading" :data="rows" stripe row-key="id" empty-text="暂无资料，管理员可点击右上角新增">
+  <PageHeader :eyebrow="isUser ? '系统管理' : '基础资料'" :title="route.meta.title" :description="admin ? (isUser ? '管理账户与角色；已有操作记录的用户请使用停用。' : '维护基础信息，已有业务引用的档案请使用停用。') : '当前角色可查看资料，修改请联系管理员。'">
+    <template v-if="admin" #actions><el-button type="primary" :icon="Plus" @click="open('create')">新增{{ isUser ? '用户' : route.meta.title.replace('档案', '') }}</el-button></template>
+  </PageHeader>
+  <div v-if="loadError" class="feedback-stack"><el-alert :title="loadError" type="error" :closable="false" show-icon /></div>
+  <DataPanel :title="isUser ? '用户列表' : '资料列表'" :description="isUser ? '按用户名、姓名或状态查找账户。' : '按编码、名称或状态快速定位资料。'">
+    <FilterBar><el-form inline class="search-bar" @submit.prevent="search">
+      <el-form-item label="搜索"><el-input v-model="query" :placeholder="isUser ? '用户名 / 姓名' : '编码 / 名称'" clearable maxlength="120" @clear="search" /></el-form-item>
+      <el-form-item label="状态"><el-select v-model="status" class="catalog-status-select" @change="search"><el-option label="全部" value="all" /><el-option label="启用" value="active" /><el-option label="停用" value="inactive" /></el-select></el-form-item>
+      <el-form-item><el-button type="primary" :icon="Search" native-type="submit" :loading="loading">查询</el-button><el-button @click="query = ''; status = 'all'; search()">重置</el-button></el-form-item>
+    </el-form></FilterBar>
+    <TableSkeleton v-if="loading && !rows.length" />
+    <el-table v-else v-loading="loading" :data="rows" stripe row-key="id">
       <el-table-column v-for="field in fields" :key="field.key" :prop="field.key === 'role_id' ? 'role_name' : field.key" :label="field.label" :min-width="field.key === 'unit' ? 75 : 145" show-overflow-tooltip />
-      <el-table-column label="状态" width="90"><template #default="{ row }"><el-tag :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? '启用' : '停用' }}</el-tag></template></el-table-column>
+      <el-table-column label="状态" width="90"><template #default="{ row }"><StatusBadge :tone="row.is_active ? 'success' : 'info'" :label="row.is_active ? '启用' : '停用'" /></template></el-table-column>
       <el-table-column label="操作" :width="admin ? isUser ? 280 : 190 : 85" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="open('view', row)">查看</el-button><el-button v-if="admin" link type="primary" @click="open('edit', row)">编辑</el-button><el-button v-if="admin && isUser && row.id !== auth.user.id" link type="warning" @click="open('password', row)">重置密码</el-button><el-button v-if="admin && (!isUser || row.id !== auth.user.id)" link type="danger" @click="remove(row)">删除</el-button></template></el-table-column>
+      <template #empty><EmptyState :title="loadError ? '资料加载失败' : '暂无符合条件的资料'" :description="loadError ? '请检查连接后重新查询。' : '可调整搜索词或状态筛选。'" /></template>
     </el-table>
     <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[10,20,50,100]" layout="total, sizes, prev, pager, next" class="pagination" @current-change="load" @size-change="search" />
-  </el-card>
-  <el-dialog v-model="dialog" :title="mode === 'password' ? `重置 ${form.username} 的密码` : `${{ create: '新增', edit: '编辑', view: '查看' }[mode]}${route.meta.title}`" width="600px" destroy-on-close :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @closed="form.password = ''">
+  </DataPanel>
+  <el-dialog v-model="dialog" :title="mode === 'password' ? `重置 ${form.username} 的密码` : `${{ create: '新增', edit: '编辑', view: '查看' }[mode]}${isUser ? '用户' : route.meta.title}`" width="min(600px, 94vw)" destroy-on-close :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @closed="form.password = ''">
+    <p class="catalog-dialog-intro">{{ mode === 'password' ? '为该用户设置新密码。保存后原登录状态将按现有认证规则处理。' : mode === 'view' ? '资料详情' : '带 * 的字段为必填项，保存后列表会自动刷新。' }}</p>
     <el-form ref="formRef" :model="form" :rules="rules" label-width="125px" :disabled="mode === 'view' || saving" @submit.prevent="save">
       <template v-if="mode !== 'password'">
         <el-form-item v-for="field in fields" :key="field.key" :label="field.label" :prop="field.key">
@@ -108,6 +124,11 @@ watch(resource, async () => {
       <el-form-item v-if="isUser && (mode === 'create' || mode === 'password')" label="新密码" prop="password"><el-input v-model="form.password" type="password" show-password autocomplete="new-password" maxlength="128" placeholder="10～128 位" /></el-form-item>
     </el-form>
     <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon />
-    <template #footer><el-button :disabled="saving" @click="dialog = false">{{ mode === 'view' ? '关闭' : '取消' }}</el-button><el-button v-if="mode !== 'view'" type="primary" :loading="saving" @click="save">保存</el-button></template>
+    <template #footer><el-button :disabled="saving" @click="dialog = false">{{ mode === 'view' ? '关闭' : '取消' }}</el-button><el-button v-if="mode !== 'view'" type="primary" :loading="saving" @click="save">{{ mode === 'password' ? '重置密码' : '保存' }}</el-button></template>
   </el-dialog>
 </template>
+
+<style scoped>
+.catalog-status-select { width: 120px; }
+.catalog-dialog-intro { margin: 0 0 20px; color: var(--wms-text-secondary); font-size: 13px; }
+</style>
