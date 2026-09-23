@@ -4,10 +4,18 @@ import { quantityUnits, quantityText } from '../quantity'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Refresh, Search, View } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
 import { canAdjustProduction } from '../permissions'
 import SettlementTable from '../components/SettlementTable.vue'
+import ProductionFlow from '../components/ProductionFlow.vue'
+import DataPanel from '../components/ui/DataPanel.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FilterBar from '../components/ui/FilterBar.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import TableSkeleton from '../components/ui/TableSkeleton.vue'
 
 const registerVisible = ref(false), registering = ref(false), registeredQuantity = ref(''), registerError = ref('')
 function openRegister() { registeredQuantity.value = current.value.actual_quantity || ''; registerError.value = ''; registerVisible.value = true }
@@ -209,31 +217,33 @@ onMounted(() => { load(); loadProducts() })
 </script>
 
 <template>
-  <div class="page-heading">
-    <div><h1>{{ route.meta.title }}</h1><p>生产单创建时固化 BOM 配方和计划理论需求；领料、补料、退料按批次即时联动库存。</p></div>
-    <div><el-button @click="load">刷新</el-button><el-button v-if="canCreate" type="primary" @click="openCreate">新建生产单</el-button></div>
-  </div>
-  <el-alert v-if="error" :title="error" type="error" :closable="true" show-icon style="margin-bottom:16px" @close="error=''" />
-  <el-card shadow="never">
-    <el-form inline @submit.prevent="page=1; load()">
+  <PageHeader eyebrow="生产管理" :title="route.meta.title" description="生产单保存 BOM 快照；领料、补料和退料按实际批次即时记账。">
+    <template #actions><el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button><el-button v-if="canCreate" :icon="Plus" type="primary" @click="openCreate">新建生产单</el-button></template>
+  </PageHeader>
+  <div v-if="error" class="feedback-stack"><el-alert :title="error" type="error" :closable="true" show-icon @close="error=''" /></div>
+  <DataPanel title="生产任务" description="按单号、成品和状态查询；打开详情可直接办理用料及完工。">
+    <FilterBar><el-form inline @submit.prevent="page=1; load()">
       <el-form-item label="搜索"><el-input v-model="query" clearable maxlength="120" placeholder="生产单号或成品名称" @clear="page=1; load()" /></el-form-item>
       <el-form-item label="状态"><el-select v-model="status" clearable style="width:150px"><el-option v-for="(label,key) in statusNames" :key="key" :value="key" :label="label" /></el-select></el-form-item>
-      <el-button native-type="submit" type="primary">查询</el-button>
-    </el-form>
-    <el-table :data="rows" v-loading="loading" stripe row-key="id" empty-text="暂无生产单">
+      <el-form-item><el-button :icon="Search" native-type="submit" type="primary">查询</el-button></el-form-item>
+    </el-form></FilterBar>
+    <TableSkeleton v-if="loading && !rows.length" />
+    <el-table v-else :data="rows" v-loading="loading" stripe row-key="id">
       <el-table-column prop="order_no" label="生产单号" min-width="190" />
       <el-table-column prop="finished_product_name" label="成品" min-width="170" />
-      <el-table-column label="计划生产" min-width="130"><template #default="{row}">{{ amount(row.planned_quantity, row.finished_product_unit) }}</template></el-table-column>
+      <el-table-column label="计划生产" min-width="135"><template #default="{row}"><span class="data-value">{{ amount(row.planned_quantity, row.finished_product_unit) }}</span></template></el-table-column>
       <el-table-column label="BOM版本" width="100"><template #default="{row}">V{{ row.bom_version }}</template></el-table-column>
-      <el-table-column label="状态" width="110"><template #default="{row}"><el-tag :type="statusTypes[row.status]">{{ statusNames[row.status] || row.status }}</el-tag></template></el-table-column>
+      <el-table-column label="状态" width="115"><template #default="{row}"><StatusBadge :tone="statusTypes[row.status] || 'info'" :label="statusNames[row.status] || row.status" /></template></el-table-column>
       <el-table-column label="创建时间" min-width="185"><template #default="{row}">{{ dateTime(row.created_at) }}</template></el-table-column>
-      <el-table-column label="操作" width="100" fixed="right"><template #default="{row}"><el-button link type="primary" @click="openDetail(row)">查看</el-button></template></el-table-column>
+      <el-table-column label="操作" width="100" fixed="right"><template #default="{row}"><el-button :icon="View" link type="primary" @click="openDetail(row)">查看</el-button></template></el-table-column>
+      <template #empty><EmptyState title="暂无生产单" description="可调整筛选条件；管理员可直接新建生产单。" /></template>
     </el-table>
     <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[10,20,50,100]" layout="total, sizes, prev, pager, next" class="pagination" @current-change="load" @size-change="page=1; load()" />
-  </el-card>
+  </DataPanel>
 
   <el-dialog v-model="createVisible" title="新建生产单" width="820px" destroy-on-close :close-on-click-modal="false">
-    <el-alert v-if="error" :title="error" type="error" show-icon style="margin-bottom:16px" />
+    <p class="dialog-intro">先填写成品和计划数量，再核对当前启用 BOM 的理论用料。</p>
+    <el-alert v-if="error" :title="error" type="error" show-icon class="dialog-feedback" />
     <el-form label-width="110px" :disabled="creating">
       <el-form-item label="成品" required><el-select v-model="createForm.finished_product_id" filterable remote :remote-method="loadProducts" placeholder="输入成品编码或名称"><el-option v-for="item in products" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name} (${item.unit})`" /></el-select></el-form-item>
       <el-form-item label="计划数量" required><el-input v-model="createForm.planned_quantity" inputmode="decimal" placeholder="如 1000" /></el-form-item>
@@ -241,21 +251,41 @@ onMounted(() => { load(); loadProducts() })
       <el-form-item label="备注"><el-input v-model="createForm.notes" type="textarea" maxlength="2000" show-word-limit /></el-form-item>
       <el-form-item><el-button :loading="previewLoading" @click="calculatePreview">预览理论用料</el-button></el-form-item>
     </el-form>
-    <el-card v-if="preview" shadow="never" class="preview-panel">
+    <TableSkeleton v-if="previewLoading" :rows="3" />
+    <DataPanel v-if="preview" title="理论用料预览" description="创建生产单时系统会重新读取并保存 BOM 快照。" class="preview-panel">
       <div class="preview-title">当前有效 BOM V{{ preview.bom_version }} · {{ amount(preview.planned_quantity, preview.finished_product_unit) }}</div>
       <el-table :data="preview.requirements" size="small">
         <el-table-column prop="material_name" label="原材料" />
         <el-table-column label="单单位用量"><template #default="{row}">{{ row.quantity_per_unit }}{{ row.bom_unit }} / {{ preview.finished_product_unit }}</template></el-table-column>
-        <el-table-column label="计划理论需求"><template #default="{row}">{{ amount(row.suggested_quantity, row.suggested_unit) }} <small>（{{ row.total_quantity }}{{ row.total_unit }}）</small></template></el-table-column>
+        <el-table-column label="计划理论需求"><template #default="{row}"><span class="data-value">{{ amount(row.suggested_quantity, row.suggested_unit) }}</span> <small>（{{ row.total_quantity }}{{ row.total_unit }}）</small></template></el-table-column>
       </el-table>
-    </el-card>
+    </DataPanel>
     <template #footer><el-button @click="createVisible=false">取消</el-button><el-button type="primary" :loading="creating" @click="createOrder">创建生产单</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="detailVisible" title="生产单详情" width="min(1280px, 95vw)" destroy-on-close :close-on-click-modal="false">
     <div v-loading="detailLoading">
       <template v-if="current">
-        <div class="detail-toolbar"><div><strong>{{ current.order_no }}</strong><el-tag :type="statusTypes[current.status]">{{ statusNames[current.status] }}</el-tag></div><div><el-button v-if="canCreate && !['cancelled','completed','received'].includes(current.status)" @click="openEdit">编辑信息</el-button><el-button v-if="canCreate && !['cancelled','completed','received'].includes(current.status)" type="danger" plain @click="cancelOrder">取消生产单</el-button></div></div>
+        <div class="detail-toolbar"><div class="detail-identity"><strong>{{ current.order_no }}</strong><StatusBadge :tone="statusTypes[current.status] || 'info'" :label="statusNames[current.status] || current.status" /><span>{{ current.finished_product_name }} · BOM V{{ current.bom_version }}</span></div><div><el-button v-if="canCreate && !['cancelled','completed','received'].includes(current.status)" @click="openEdit">编辑信息</el-button><el-button v-if="canCreate && !['cancelled','completed','received'].includes(current.status)" type="danger" plain @click="cancelOrder">取消生产单</el-button></div></div>
+        <ProductionFlow :order="current" />
+        <div v-if="['ready','in_progress'].includes(current.status)" class="production-primary-actions">
+          <span>下一步操作</span>
+          <el-button v-if="canAdjustProduction(auth.user?.role)" @click="openRegister">登记实际产量</el-button>
+          <el-button v-if="canPost" type="primary" @click="openComplete">预览并完成生产</el-button>
+        </div>
+        <h3>原材料需求与当前净领用</h3>
+        <el-table :data="current.materials" border stripe row-key="id">
+          <el-table-column prop="material_name" label="原材料" min-width="150" />
+          <el-table-column label="单位用量" min-width="135"><template #default="{row}">{{ row.quantity_per_unit }}{{ row.bom_unit }} / {{ current.finished_product_unit }}</template></el-table-column>
+          <el-table-column label="计划理论需求" min-width="145"><template #default="{row}"><span class="data-value">{{ amount(row.planned_required_quantity, row.base_unit) }}</span></template></el-table-column>
+          <el-table-column label="已领" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.issued_quantity, row.base_unit) }}</span></template></el-table-column>
+          <el-table-column label="补料" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.supplemented_quantity, row.base_unit) }}</span></template></el-table-column>
+          <el-table-column label="退料" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.returned_quantity, row.base_unit) }}</span></template></el-table-column>
+          <el-table-column label="当前净领用" min-width="145"><template #default="{row}"><strong class="data-value">{{ amount(row.net_issued_quantity, row.base_unit) }}</strong></template></el-table-column>
+          <el-table-column v-if="canAdjustProduction(auth.user?.role) && ['ready','in_progress'].includes(current.status)" label="操作" width="175" fixed="right"><template #default="{row}"><el-button v-if="canPost" link type="primary" @click="openAction('issue',row)">领料</el-button><el-button link type="warning" @click="openAction('supplement',row)">补料</el-button><el-button link type="success" @click="openAction('return',row)">退料</el-button></template></el-table-column>
+        </el-table>
+        <template v-if="current.status === 'completed'"><h3>原材料结算</h3><SettlementTable :rows="current.materials" /></template>
+        <h3>生产单信息</h3>
         <el-descriptions :column="3" border>
           <el-descriptions-item label="成品">{{ current.finished_product_name }}</el-descriptions-item>
           <el-descriptions-item label="计划生产">{{ amount(current.planned_quantity, current.finished_product_unit) }}</el-descriptions-item>
@@ -267,22 +297,8 @@ onMounted(() => { load(); loadProducts() })
           <el-descriptions-item label="创建时间">{{ dateTime(current.created_at) }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="3">{{ current.notes || '—' }}</el-descriptions-item>
         </el-descriptions>
-        <el-button v-if="canAdjustProduction(auth.user?.role) && ['ready','in_progress'].includes(current.status)" style="margin-top:16px" @click="openRegister">登记实际产量</el-button>
-        <el-button v-if="canPost && ['ready','in_progress'].includes(current.status)" type="primary" style="margin-top:16px" @click="openComplete">完成生产</el-button>
-        <template v-if="current.status === 'completed'"><h3>原材料结算</h3><SettlementTable :rows="current.materials" /></template>
-        <h3>原材料需求与当前净领用</h3>
-        <el-table :data="current.materials" border stripe row-key="id">
-          <el-table-column prop="material_name" label="原材料" min-width="150" />
-          <el-table-column label="单位用量" min-width="135"><template #default="{row}">{{ row.quantity_per_unit }}{{ row.bom_unit }} / {{ current.finished_product_unit }}</template></el-table-column>
-          <el-table-column label="计划理论需求" min-width="130"><template #default="{row}">{{ amount(row.planned_required_quantity, row.base_unit) }}</template></el-table-column>
-          <el-table-column label="已领" min-width="100"><template #default="{row}">{{ amount(row.issued_quantity, row.base_unit) }}</template></el-table-column>
-          <el-table-column label="补料" min-width="100"><template #default="{row}">{{ amount(row.supplemented_quantity, row.base_unit) }}</template></el-table-column>
-          <el-table-column label="退料" min-width="100"><template #default="{row}">{{ amount(row.returned_quantity, row.base_unit) }}</template></el-table-column>
-          <el-table-column label="当前净领用" min-width="125"><template #default="{row}"><strong>{{ amount(row.net_issued_quantity, row.base_unit) }}</strong></template></el-table-column>
-          <el-table-column v-if="canAdjustProduction(auth.user?.role) && ['ready','in_progress'].includes(current.status)" label="操作" width="175" fixed="right"><template #default="{row}"><el-button v-if="canPost" link type="primary" @click="openAction('issue',row)">领料</el-button><el-button link type="warning" @click="openAction('supplement',row)">补料</el-button><el-button link type="success" @click="openAction('return',row)">退料</el-button></template></el-table-column>
-        </el-table>
         <h3>物料操作记录</h3>
-        <el-table :data="current.material_records" stripe empty-text="尚未发生物料业务">
+        <el-table :data="current.material_records" stripe>
           <el-table-column label="时间" min-width="175"><template #default="{row}">{{ dateTime(row.created_at) }}</template></el-table-column>
           <el-table-column prop="document_no" label="单据号" min-width="190" />
           <el-table-column label="类型" width="110"><template #default="{row}">{{ kindNames[row.kind] }}</template></el-table-column>
@@ -291,60 +307,71 @@ onMounted(() => { load(); loadProducts() })
           <el-table-column label="库存变化" min-width="190"><template #default="{row}">{{ row.before_quantity }} → {{ row.after_quantity }} {{ row.unit }}</template></el-table-column>
           <el-table-column prop="operator_name" label="操作人" width="105" />
           <el-table-column prop="notes" label="备注" min-width="140" show-overflow-tooltip />
+          <template #empty><EmptyState title="尚无物料操作" description="领料、补料或退料后将在这里显示批次记录。" /></template>
         </el-table>
       </template>
     </div>
     <template #footer><el-button @click="detailVisible=false">关闭</el-button></template>
   </el-dialog>
 
-  <el-dialog v-model="completeVisible" title="完成生产" width="min(1200px, 95vw)" :close-on-click-modal="false" :close-on-press-escape="!completing" :show-close="!completing">
-    <el-alert v-if="settlementError" :title="settlementError" type="error" show-icon style="margin-bottom:16px" />
+  <el-dialog v-model="completeVisible" title="完成生产" width="min(1280px, 95vw)" :close-on-click-modal="false" :close-on-press-escape="!completing" :show-close="!completing">
+    <el-alert v-if="settlementError" :title="settlementError" type="error" show-icon class="dialog-feedback" />
     <el-form label-width="120px" :disabled="completing"><el-form-item label="实际完成数量" required><el-input v-model="actualQuantity" inputmode="decimal" placeholder="填写最终实际产量"><template #append>{{ current?.finished_product_unit }}</template></el-input></el-form-item></el-form>
     <el-button :loading="settling" :disabled="completing" @click="previewSettlement">预览结算</el-button>
-    <template v-if="settlement"><p>确认后成品入库 {{ settlement.actual_quantity }} {{ settlement.finished_product_unit }}，并冻结生产单。提交时系统会重新核对物料记录。</p><SettlementTable :rows="settlement.materials" /></template>
+    <TableSkeleton v-if="settling" :rows="3" />
+    <template v-if="settlement"><el-alert class="settlement-notice" type="info" :closable="false" show-icon :title="`确认后成品入库 ${settlement.actual_quantity} ${settlement.finished_product_unit}，并冻结生产单。提交时系统会重新核对物料记录。`" /><SettlementTable :rows="settlement.materials" /></template>
     <template #footer><el-button :disabled="completing" @click="completeVisible=false">取消</el-button><el-button type="primary" :disabled="!settlement || settling" :loading="completing" @click="finishProduction">确认完成</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="editVisible" title="编辑生产单信息" width="520px" :close-on-click-modal="false">
-    <el-alert v-if="error" :title="error" type="error" show-icon style="margin-bottom:16px" />
+    <el-alert v-if="error" :title="error" type="error" show-icon class="dialog-feedback" />
     <el-form label-width="100px"><el-form-item label="计划日期"><el-date-picker v-model="editForm.planned_date" type="date" value-format="YYYY-MM-DD" /></el-form-item><el-form-item label="备注"><el-input v-model="editForm.notes" type="textarea" maxlength="2000" /></el-form-item></el-form>
     <template #footer><el-button @click="editVisible=false">取消</el-button><el-button type="primary" :loading="editSaving" @click="saveEdit">保存</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="actionVisible" :title="`${actionNames[action.kind]} · ${action.material?.material_name || ''}`" width="820px" :close-on-click-modal="false">
-    <el-alert v-if="error" :title="error" type="error" show-icon style="margin-bottom:16px" />
-    <el-alert v-if="action.kind !== 'return'" title="批次按到期日、入库时间、批次 ID 依次推荐；可修改各批次数量，但过期或库存不足会由服务端拒绝。" type="info" :closable="false" style="margin-bottom:16px" />
-    <el-alert v-else title="退料只能回到本生产单实际领用过的原批次，并且不能超过该批次累计净领出量。" type="info" :closable="false" style="margin-bottom:16px" />
+    <el-alert v-if="error" :title="error" type="error" show-icon class="dialog-feedback" />
+    <el-alert v-if="action.kind !== 'return'" title="批次按到期日、入库时间、批次 ID 依次推荐；可修改各批次数量，但过期或库存不足会由服务端拒绝。" type="info" :closable="false" class="dialog-feedback" />
+    <el-alert v-else title="退料只能回到本生产单实际领用过的原批次，并且不能超过该批次累计净领出量。" type="info" :closable="false" class="dialog-feedback" />
     <div v-if="action.material" class="action-summary">
       <span>理论 {{ amount(action.material.planned_required_quantity, action.unit) }}</span>
       <span>已领 {{ amount(action.material.issued_quantity, action.unit) }}</span>
       <span>当前净领用 {{ amount(action.material.net_issued_quantity, action.unit) }}</span>
     </div>
     <el-form v-if="action.kind !== 'return'" inline @submit.prevent="applySuggestion"><el-form-item label="本次总量"><el-input v-model="action.desired" inputmode="decimal" style="width:180px"><template #append>{{ action.unit }}</template></el-input></el-form-item><el-button @click="applySuggestion">重新按 FEFO 分配</el-button></el-form>
-    <el-table :data="action.allocations" v-loading="candidateLoading" border empty-text="暂无可用批次">
+    <TableSkeleton v-if="candidateLoading && !action.allocations.length" :rows="3" />
+    <el-table v-else :data="action.allocations" v-loading="candidateLoading" border>
       <el-table-column prop="batch_no" label="批次" min-width="150" />
       <el-table-column v-if="action.kind !== 'return'" prop="expiry_date" label="到期日期" width="130" />
-      <el-table-column v-if="action.kind !== 'return'" label="库存余额" min-width="130"><template #default="{row}">{{ amount(row.remaining_quantity, row.unit) }}</template></el-table-column>
-      <el-table-column v-else label="最多可退" min-width="130"><template #default="{row}">{{ amount(row.max_return, action.unit) }}</template></el-table-column>
+      <el-table-column v-if="action.kind !== 'return'" label="库存余额" min-width="130"><template #default="{row}"><span class="data-value">{{ amount(row.remaining_quantity, row.unit) }}</span></template></el-table-column>
+      <el-table-column v-else label="最多可退" min-width="130"><template #default="{row}"><span class="data-value">{{ amount(row.max_return, action.unit) }}</span></template></el-table-column>
       <el-table-column :label="`${actionNames[action.kind]}数量 (${action.unit})`" min-width="180"><template #default="{row}"><el-input v-model="row.quantity" inputmode="decimal" placeholder="不使用则留空" /></template></el-table-column>
+      <template #empty><EmptyState :title="action.kind === 'return' ? '暂无可退批次' : '暂无可用批次'" description="请核查原料库存、有效期和当前生产单物料记录。" /></template>
     </el-table>
     <el-form label-width="70px" style="margin-top:16px"><el-form-item label="备注"><el-input v-model="action.notes" maxlength="2000" /></el-form-item></el-form>
     <template #footer><el-button @click="actionVisible=false">取消</el-button><el-button type="primary" :loading="actionSaving" @click="submitAction">确认{{ actionNames[action.kind] }}</el-button></template>
   </el-dialog>
   <el-dialog v-model="registerVisible" title="登记实际产量" width="480px" :close-on-click-modal="false">
-    <el-alert title="登记不会自动入库；由仓库预览结算并完成生产。" type="info" :closable="false" />
-    <el-alert v-if="registerError" :title="registerError" type="error" :closable="false" />
+    <el-alert title="登记不会自动入库；由仓库预览结算并完成生产。" type="info" :closable="false" class="dialog-feedback" />
+    <el-alert v-if="registerError" :title="registerError" type="error" :closable="false" class="dialog-feedback" />
     <el-form @submit.prevent="registerActual"><el-form-item label="实际数量"><el-input v-model="registeredQuantity" :disabled="registering" inputmode="decimal"><template #append>{{ current?.finished_product_unit }}</template></el-input></el-form-item></el-form>
     <template #footer><el-button @click="registerVisible = false" :disabled="registering">取消</el-button><el-button type="primary" @click="registerActual" :loading="registering">保存产量</el-button></template>
   </el-dialog>
 </template>
 
 <style scoped>
-.preview-panel { margin: 10px 0; }
-.preview-title { margin-bottom: 12px; font-weight: 600; }
-.detail-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-.detail-toolbar strong { margin-right: 12px; font-size: 19px; }
-.action-summary { display: flex; gap: 24px; padding: 12px 15px; margin-bottom: 16px; background: #f6f8fb; border-radius: 6px; color: #53647a; font-size: 13px; }
-h3 { margin-top: 24px; }
-small { color: #8b96a6; }
+.dialog-intro { margin: 0 0 16px; color: var(--wms-text-secondary); font-size: 12px; }
+.dialog-feedback { margin-bottom: 16px; }
+.preview-panel { margin: 15px 0 0; }
+.preview-title { margin-bottom: 12px; color: #225a9d; font-weight: 650; }
+.detail-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.detail-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.detail-identity strong { font-size: 19px; font-weight: 700; }
+.detail-identity > span:last-child { color: var(--wms-text-secondary); font-size: 12px; }
+.production-primary-actions { display: flex; align-items: center; gap: 9px; margin: 0 0 16px; padding: 11px 13px; border: 1px solid rgba(22,119,232,.12); border-radius: 12px; background: #f6faff; }
+.production-primary-actions span { margin-right: auto; color: #4d647e; font-size: 12px; font-weight: 650; }
+.action-summary { display: flex; flex-wrap: wrap; gap: 12px 24px; padding: 12px 15px; margin-bottom: 16px; border: 1px solid var(--wms-border); border-radius: 11px; background: var(--wms-surface-soft); color: var(--wms-text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
+.settlement-notice { margin: 16px 0; }
+h3 { margin: 23px 0 12px; font-size: 15px; font-weight: 680; }
+small { color: var(--wms-text-tertiary); }
 </style>
