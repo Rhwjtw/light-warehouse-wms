@@ -1,0 +1,195 @@
+.el-button {
+  min-height: 36px;
+  border-radius: var(--wms-radius-control);
+  font-weight: 550;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 120ms ease;
+}
+
+.el-button:not(.is-disabled):active {
+  transform: scale(0.98);
+}
+
+.el-button--primary:not(.is-plain, .is-link) {
+  box-shadow: 0 4px 12px rgba(22, 119, 232, 0.2);
+}
+
+.el-button--primary:not(.is-disabled, .is-plain, .is-link):hover {
+  background: var(--wms-primary-hover);
+  border-color: var(--wms-primary-hover);
+  box-shadow: 0 6px 16px rgba(22, 119, 232, 0.24);
+}
+
+.el-button.is-link {
+  min-height: auto;
+  padding-inline: 4px;
+}
+
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner,
+.el-date-editor.el-input__wrapper,
+.el-input-number {
+  border-radius: var(--wms-radius-control);
+  box-shadow: 0 0 0 1px var(--wms-border) inset;
+  transition: box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.el-input__wrapper:hover,
+.el-select__wrapper:hover,
+.el-textarea__inner:hover {
+  box-shadow: 0 0 0 1px var(--wms-border-strong) inset;
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--wms-primary) inset, 0 0 0 3px rgba(22, 119, 232, 0.12) !important;
+}
+
+.el-card {
+  border: 1px solid var(--wms-border);
+  border-radius: var(--wms-radius-card);
+  background: var(--wms-surface);
+  box-shadow: var(--wms-shadow-card);
+}
+
+.el-card__header {
+  padding: 17px 20px;
+  border-bottom-color: var(--wms-border);
+}
+
+.el-card__body {
+  padding: 20px;
+}
+
+.el-table {
+  --el-table-header-bg-color: #fafbfc;
+  --el-table-row-hover-bg-color: #f3f7fc;
+  --el-table-border-color: rgba(15, 23, 42, 0.075);
+  border-radius: 12px;
+  color: #343941;
+}
+
+.el-table th.el-table__cell {
+  height: 44px;
+  padding: 8px 0;
+  color: #5d6673;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.015em;
+}
+
+.el-table td.el-table__cell {
+  height: 47px;
+  padding: 8px 0;
+}
+
+.el-table .cell {
+  line-height: 1.45;
+}
+
+.el-table::before,
+.el-table__inner-wrapper::before {
+  background-color: var(--wms-border);
+}
+
+.el-dialog {
+  max-height: 100%;
+  margin: 0 auto !important;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: var(--wms-radius-dialog);
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: var(--wms-shadow-floating);
+}
+
+.el-dialog__header {
+  margin: 0;
+  padding: 21px 24px 16px;
+  border-bottom: 1px solid var(--wms-border);
+}
+
+.el-dialog__title {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.el-dialog__body {
+  min-height: 0;
+  overflow: auto;
+  padding: 22px 24px;
+}
+
+.el-dialog__footer {
+  padding: 15px 24px 19px;
+  border-top: 1px solid var(--wms-border);
+  background: #fcfcfd;
+}
+
+.el-overlay-dialog {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: hidden;
+  backdrop-filter: blur(3px);
+}
+
+.el-drawer__wrapper {
+  backdrop-filter: blur(3px);
+}
+
+.el-popper,
+.el-message,
+.el-message-box {
+  border-radius: 14px !important;
+  box-shadow: 0 16px 44px rgba(15, 23, 42, 0.14) !important;
+}
+
+.el-message {
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(12px);
+}
+
+.el-alert {
+  border: 1px solid transparent;
+  border-radius: 12px;
+}
+
+.el-alert--success.is-light { border-color: rgba(36, 138, 61, 0.13); }
+.el-alert--warning.is-light { border-color: rgba(173, 90, 0, 0.14); }
+.el-alert--error.is-light { border-color: rgba(215, 0, 21, 0.12); }
+.el-alert--info.is-light { border-color: rgba(70, 98, 127, 0.12); }
+
+.el-pagination {
+  --el-pagination-button-bg-color: transparent;
+  --el-pagination-hover-color: var(--wms-primary);
+}
+
+.el-pagination button,
+.el-pager li {
+  border-radius: 8px;
+}
+
+.el-tag {
+  border-radius: 999px;
+  font-weight: 550;
+}
+
+.el-form-item__label {
+  color: #515966;
+  font-weight: 550;
+}
+
+.el-loading-mask {
+  background-color: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(1px);
+}
+
+:focus-visible {
+  outline: 3px solid rgba(22, 119, 232, 0.24);
+  outline-offset: 2px;
+}

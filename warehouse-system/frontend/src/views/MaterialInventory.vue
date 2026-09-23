@@ -2,8 +2,15 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
+import DataPanel from '../components/ui/DataPanel.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FilterBar from '../components/ui/FilterBar.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import TableSkeleton from '../components/ui/TableSkeleton.vue'
 
 const route = useRoute()
 const resource = computed(() => route.meta.resource)
@@ -19,6 +26,8 @@ const query = ref(''), page = ref(1), pageSize = ref(20)
 let requestId = '', lastPayload = '', generation = 0, batchGeneration = 0
 // generation 令牌丢弃晚到的旧查询响应，避免快速切页/换原料时旧数据覆盖当前页面。
 const endpoint = computed(() => writePage.value ? 'material-transactions' : resource.value === 'batches' ? 'material-batches' : resource.value)
+const panelTitle = computed(() => receipt.value ? '入库登记' : outbound.value ? '出库登记' : route.meta.title)
+const listTitle = computed(() => receipt.value ? '最近入库记录' : outbound.value ? '最近出库记录' : route.meta.title)
 const columns = computed(() => resource.value === 'material-stock' ? [
   ['code', '原料编码'], ['name', '原料名称'], ['remaining_quantity', '总库存（含过期）'], ['unit', '单位'],
 ] : resource.value === 'batches' ? [
@@ -35,6 +44,7 @@ function display(row, key) {
   if (key === 'created_at') return new Date(row[key]).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false })
   return row[key]
 }
+function isQuantityColumn(key) { return ['received_quantity', 'remaining_quantity', 'input_quantity', 'before_quantity', 'change_quantity', 'after_quantity'].includes(key) }
 const optionGeneration = {}
 async function searchOptions(name, q = '') {
   const ticket = optionGeneration[name] = (optionGeneration[name] || 0) + 1
@@ -108,30 +118,48 @@ watch(resource, async () => {
 </script>
 
 <template>
-  <div class="page-heading"><div><h1>{{ route.meta.title }}</h1><p>批次记账，数量与流水同步保存。所有数量均以原料库存单位汇总。</p></div><el-button @click="error = ''; load()">刷新</el-button></div>
-  <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon style="margin-bottom:16px" />
-  <el-alert v-if="success" type="success" :closable="false" :title="`已记账：${success.document_no}，批次余额 ${success.after_quantity} ${success.unit}`" style="margin-bottom:16px" />
-  <el-card v-if="writePage && canWrite" shadow="never" style="margin-bottom:20px">
+  <PageHeader eyebrow="原材料库存" :title="route.meta.title" description="批次记账与库存流水同步保存，关键数量按库存单位清晰呈现。">
+    <template #actions><el-button :icon="Refresh" :loading="loading" @click="error = ''; load()">刷新</el-button></template>
+  </PageHeader>
+
+  <div v-if="error || success" class="feedback-stack">
+    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
+    <el-alert v-if="success" type="success" :closable="false" show-icon :title="`已记账：${success.document_no}，批次余额 ${success.after_quantity} ${success.unit}`" />
+  </div>
+
+  <DataPanel v-if="writePage && canWrite" :title="panelTitle" :description="receipt ? '填写批次、日期、供应商和库位后直接完成入库。' : '默认推荐最早到期的可用批次，也可选择其他合法批次。'" kind="action">
     <el-form label-width="105px" :disabled="saving" @submit.prevent="submit">
-      <el-row :gutter="24"><el-col :span="12"><el-form-item label="原材料" required><el-select v-model="form.material_id" filterable remote :remote-method="q => searchOptions('materials', q)" placeholder="输入编码或名称搜索" @change="materialChanged"><el-option v-for="item in options.materials" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name} (${item.unit})`" /></el-select></el-form-item></el-col>
-        <el-col :span="12"><el-form-item label="数量 / 单位" required><el-input v-model="form.quantity" inputmode="decimal" maxlength="21" style="width:65%" placeholder="如 10.500001" /><el-select v-model="form.unit" style="width:35%"><el-option v-for="u in ['kg','g','L','mL','个']" :key="u" :value="u" :label="u" /></el-select></el-form-item></el-col></el-row>
-      <template v-if="receipt"><el-row :gutter="24"><el-col :span="12"><el-form-item label="批号" required><el-input v-model="form.batch_no" maxlength="80" /></el-form-item></el-col>
+      <el-row :gutter="20"><el-col :span="12"><el-form-item label="原材料" required><el-select v-model="form.material_id" filterable remote :remote-method="q => searchOptions('materials', q)" placeholder="输入编码或名称搜索" @change="materialChanged"><el-option v-for="item in options.materials" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name} (${item.unit})`" /></el-select></el-form-item></el-col>
+        <el-col :span="12"><el-form-item label="数量 / 单位" required><div class="quantity-input"><el-input v-model="form.quantity" inputmode="decimal" maxlength="21" placeholder="如 10.500001" /><el-select v-model="form.unit"><el-option v-for="u in ['kg','g','L','mL','个']" :key="u" :value="u" :label="u" /></el-select></div></el-form-item></el-col></el-row>
+      <template v-if="receipt"><el-row :gutter="20"><el-col :span="12"><el-form-item label="批号" required><el-input v-model="form.batch_no" maxlength="80" placeholder="请输入批号" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item label="供应商" required><el-select v-model="form.supplier_id" filterable remote :remote-method="q => searchOptions('suppliers',q)" placeholder="输入编码或名称搜索"><el-option v-for="item in options.suppliers" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name}`" /></el-select></el-form-item></el-col></el-row>
-        <el-row :gutter="24"><el-col :span="12"><el-form-item label="生产日期" required><el-date-picker v-model="form.production_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></el-col><el-col :span="12"><el-form-item label="到期日期" required><el-date-picker v-model="form.expiry_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></el-col></el-row>
+        <el-row :gutter="20"><el-col :span="12"><el-form-item label="生产日期" required><el-date-picker v-model="form.production_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></el-col><el-col :span="12"><el-form-item label="到期日期" required><el-date-picker v-model="form.expiry_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></el-col></el-row>
         <el-form-item label="库位" required><el-select v-model="form.location_id" filterable remote :remote-method="q => searchOptions('locations',q)" placeholder="输入编码或名称搜索"><el-option v-for="item in options.locations" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name}`" /></el-select></el-form-item>
       </template>
-      <template v-if="outbound"><el-alert title="默认选择最早到期的可用批次；到期当天仍有效。可手动选择其他合法批次。" type="info" :closable="false" style="margin-bottom:16px" />
+      <template v-if="outbound"><el-alert title="默认选择最早到期的可用批次；到期当天仍有效。可手动选择其他合法批次。" type="info" :closable="false" class="form-notice" />
         <el-form-item label="出库批次" required><el-select v-model="form.batch_id" placeholder="先选择原材料"><el-option v-for="(b,i) in candidates" :key="b.id" :value="b.id" :label="`${candidatePage === 1 && i === 0 ? '推荐 · ' : ''}${b.batch_no} · 到期 ${b.expiry_date} · 余额 ${b.remaining_quantity} ${b.unit} · ${b.location_name}`" /></el-select></el-form-item>
         <el-pagination v-if="candidateTotal > 20" v-model:current-page="candidatePage" :total="candidateTotal" :page-size="20" layout="prev, pager, next" @current-change="form.batch_id=null; loadBatches(false)" />
-        <p v-if="form.material_id && !candidateTotal">暂无可用批次，请先入库或核查档案状态。</p>
+        <EmptyState v-if="form.material_id && !candidateTotal" title="暂无可用批次" description="请先入库，或核查批次有效期与相关档案状态。" />
       </template>
-      <el-form-item label="备注"><el-input v-model="form.notes" maxlength="2000" /></el-form-item>
-      <el-form-item><el-button native-type="submit" type="primary" :loading="saving">{{ receipt ? '确认入库' : '确认出库' }}</el-button></el-form-item>
+      <el-form-item label="备注"><el-input v-model="form.notes" maxlength="2000" placeholder="可选" /></el-form-item>
+      <el-form-item><el-button native-type="submit" type="primary" size="large" :loading="saving">{{ receipt ? '确认入库' : '确认出库' }}</el-button></el-form-item>
     </el-form>
-  </el-card>
-  <el-alert v-if="writePage && !canWrite" title="当前角色可查看记录，实际库存操作由仓库人员或管理员执行。" type="info" :closable="false" />
-  <el-card shadow="never"><el-form inline @submit.prevent="page=1; load()"><el-form-item label="搜索"><el-input v-model="query" maxlength="120" clearable placeholder="原料编码、名称；明细支持批号" @clear="page=1; load()" /></el-form-item><el-button native-type="submit" type="primary">查询</el-button></el-form>
-    <el-table :data="rows" v-loading="loading" stripe row-key="id" empty-text="暂无库存记录"><el-table-column v-for="[key,label] in columns" :key="key" :label="label" :min-width="key === 'created_at' || key === 'document_no' ? 200 : 130" show-overflow-tooltip><template #default="{row}">{{ display(row,key) }}</template></el-table-column><el-table-column v-if="resource==='batches'" label="有效状态" width="100"><template #default="{row}"><el-tag :type="row.expired?'danger':'success'">{{ row.expired?'已过期':'未过期' }}</el-tag></template></el-table-column></el-table>
+  </DataPanel>
+
+  <el-alert v-if="writePage && !canWrite" title="当前角色可查看记录，实际库存操作由仓库人员或管理员执行。" type="info" :closable="false" class="permission-notice" />
+
+  <DataPanel :title="listTitle" description="支持按原料编码、名称或批号快速检索。">
+    <FilterBar><el-form inline @submit.prevent="page=1; load()"><el-form-item label="搜索"><el-input v-model="query" maxlength="120" clearable placeholder="原料编码、名称；明细支持批号" @clear="page=1; load()" /></el-form-item><el-form-item><el-button :icon="Search" native-type="submit" type="primary">查询</el-button></el-form-item></el-form></FilterBar>
+    <TableSkeleton v-if="loading && !rows.length" />
+    <el-table v-else :data="rows" v-loading="loading" stripe row-key="id"><el-table-column v-for="[key,label] in columns" :key="key" :label="label" :min-width="key === 'created_at' || key === 'document_no' ? 200 : 130" show-overflow-tooltip><template #default="{row}"><span :class="{ 'data-value': isQuantityColumn(key) }">{{ display(row,key) ?? '—' }}</span></template></el-table-column><el-table-column v-if="resource==='batches'" label="有效状态" width="110"><template #default="{row}"><StatusBadge :tone="row.expired ? 'danger' : 'success'" :label="row.expired ? '已过期' : '未过期'" /></template></el-table-column><template #empty><EmptyState title="暂无库存记录" description="当前查询条件下没有匹配的库存数据。" /></template></el-table>
     <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[10,20,50,100]" layout="total, sizes, prev, pager, next" class="pagination" @current-change="load" @size-change="page=1; load()" />
-  </el-card>
+  </DataPanel>
 </template>
+
+<style scoped>
+.quantity-input { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) 104px; }
+.quantity-input :deep(.el-input__wrapper) { border-radius: 10px 0 0 10px; }
+.quantity-input :deep(.el-select__wrapper) { border-radius: 0 10px 10px 0; }
+.form-notice { margin-bottom: 16px; }
+.permission-notice { margin-bottom: 18px; }
+</style>

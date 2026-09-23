@@ -2,6 +2,7 @@
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Key, SwitchButton } from '@element-plus/icons-vue'
 import { auth, clearAuth, logout } from '../auth'
 import { api } from '../api'
 const router = useRouter(), dialog = ref(false), saving = ref(false), error = ref('')
@@ -19,7 +20,11 @@ async function save() {
 }
 </script>
 <template>
-  <div class="account-bar"><el-tag type="info" effect="plain">{{ auth.user?.role_name }}</el-tag><span>{{ auth.user?.display_name }}</span><el-button link type="primary" @click="reset(); dialog = true">修改密码</el-button><el-button link @click="signOut">退出</el-button></div>
+  <div class="account-bar">
+    <div class="account-identity"><el-avatar :size="32" class="account-avatar">{{ auth.user?.display_name?.slice(0, 1) }}</el-avatar><span>{{ auth.user?.display_name }}</span><el-tag type="info" effect="plain">{{ auth.user?.role_name }}</el-tag></div>
+    <el-button link type="primary" @click="reset(); dialog = true"><el-icon><Key /></el-icon>修改密码</el-button>
+    <el-button link @click="signOut"><el-icon><SwitchButton /></el-icon>退出</el-button>
+  </div>
   <el-dialog v-model="dialog" title="修改我的密码" width="480px" :close-on-click-modal="false" :show-close="!saving" :close-on-press-escape="!saving" @closed="reset">
     <el-form label-width="95px" :disabled="saving" @submit.prevent="save"><el-form-item label="原密码"><el-input v-model="form.current_password" type="password" show-password autocomplete="current-password" maxlength="128" /></el-form-item><el-form-item label="新密码"><el-input v-model="form.new_password" type="password" show-password autocomplete="new-password" maxlength="128" /></el-form-item><el-form-item label="确认新密码"><el-input v-model="form.confirm" type="password" show-password autocomplete="new-password" maxlength="128" /></el-form-item></el-form><el-alert v-if="error" :title="error" type="error" :closable="false" /><template #footer><el-button :disabled="saving" @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">修改并重新登录</el-button></template>
   </el-dialog>

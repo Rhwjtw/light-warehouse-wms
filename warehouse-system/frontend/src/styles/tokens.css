@@ -1,0 +1,52 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+
+  --wms-bg: #f5f5f7;
+  --wms-surface: #ffffff;
+  --wms-surface-soft: #fafafc;
+  --wms-surface-raised: rgba(255, 255, 255, 0.94);
+  --wms-text: #1d1d1f;
+  --wms-text-secondary: #626269;
+  --wms-text-tertiary: #86868b;
+  --wms-border: rgba(15, 23, 42, 0.09);
+  --wms-border-strong: rgba(15, 23, 42, 0.15);
+  --wms-primary: #1677e8;
+  --wms-primary-hover: #0b68d4;
+  --wms-primary-soft: #edf5ff;
+  --wms-success: #248a3d;
+  --wms-success-soft: #eef8f0;
+  --wms-warning: #ad5a00;
+  --wms-warning-soft: #fff7e8;
+  --wms-danger: #d70015;
+  --wms-danger-soft: #fff0f1;
+  --wms-info: #46627f;
+  --wms-info-soft: #f1f5f9;
+
+  --wms-radius-sm: 8px;
+  --wms-radius-control: 10px;
+  --wms-radius-card: 16px;
+  --wms-radius-dialog: 20px;
+  --wms-shadow-card: 0 7px 24px rgba(15, 23, 42, 0.045);
+  --wms-shadow-hover: 0 12px 30px rgba(15, 23, 42, 0.075);
+  --wms-shadow-floating: 0 24px 70px rgba(15, 23, 42, 0.16);
+  --wms-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --el-color-primary: var(--wms-primary);
+  --el-color-success: var(--wms-success);
+  --el-color-warning: #c56b12;
+  --el-color-danger: var(--wms-danger);
+  --el-color-info: #748092;
+  --el-text-color-primary: var(--wms-text);
+  --el-text-color-regular: #4f5662;
+  --el-text-color-secondary: var(--wms-text-secondary);
+  --el-border-color: var(--wms-border);
+  --el-border-color-light: rgba(15, 23, 42, 0.07);
+  --el-fill-color-light: #f6f7f9;
+  --el-fill-color-lighter: #fafbfc;
+  --el-bg-color-page: var(--wms-bg);
+  --el-border-radius-base: var(--wms-radius-control);
+  --el-border-radius-small: var(--wms-radius-sm);
+  --el-font-size-base: 14px;
+}

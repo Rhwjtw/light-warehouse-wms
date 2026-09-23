@@ -2,8 +2,14 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Refresh, Search, View } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
+import DataPanel from '../components/ui/DataPanel.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FilterBar from '../components/ui/FilterBar.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import TableSkeleton from '../components/ui/TableSkeleton.vue'
 
 const route = useRoute()
 const resource = computed(() => route.meta.resource)
@@ -20,6 +26,8 @@ let listGeneration = 0, optionGeneration = 0, selectionGeneration = 0, lastPaylo
 // 三类序号分别隔离列表、下拉选项和库存详情的异步响应，防止旧请求覆盖新选择。
 const endpoint = computed(() => isStock.value && stockTab.value === 'ledger' ? 'finished-transactions' : resource.value)
 const balanceView = computed(() => endpoint.value === 'finished-stock')
+const formTitle = computed(() => isReceipt.value ? '成品入库登记' : '成品出库登记')
+const listTitle = computed(() => isStock.value ? (stockTab.value === 'balance' ? '成品库存' : '成品库存流水') : (isReceipt.value ? '最近入库记录' : '最近出库记录'))
 const columns = computed(() => balanceView.value ? [
   ['code', '成品编码'], ['name', '成品名称'], ['unit', '单位'], ['quantity', '当前库存'],
   ['last_receipt_at', '最近入库时间'], ['last_outbound_at', '最近出库时间'],
@@ -38,6 +46,7 @@ function display(row, key) {
   if (key === 'business_type') return row[key] === 'production' ? '生产入库' : row.kind === 'finished_receipt' ? '普通入库' : '普通出库'
   return row[key]
 }
+function isQuantityColumn(key) { return ['quantity', 'change_quantity', 'after_quantity', 'before_quantity'].includes(key) }
 async function searchProducts(query = '') {
   const ticket = ++optionGeneration
   try {
@@ -106,31 +115,42 @@ watch(resource, async () => {
 </script>
 
 <template>
-  <div class="page-heading"><div><h1>{{ route.meta.title }}</h1><p>单位沿用成品档案，确认后库存与流水同步记账。</p></div><el-button :disabled="saving" @click="load(); !isStock && selectProduct()">刷新</el-button></div>
-  <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="notice" />
-  <el-alert v-if="success" :title="`记账成功：${success.document_no}，记账后库存 ${success.after_quantity} ${success.unit}`" type="success" :closable="false" class="notice" />
-  <el-card v-if="!isStock && canWrite" shadow="never" class="notice">
+  <PageHeader eyebrow="成品库存" :title="route.meta.title" description="单位始终沿用成品档案，确认后库存、单据和流水同步记账。">
+    <template #actions><el-button :icon="Refresh" :disabled="saving" :loading="loading" @click="load(); !isStock && selectProduct()">刷新</el-button></template>
+  </PageHeader>
+
+  <div v-if="error || success" class="feedback-stack">
+    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
+    <el-alert v-if="success" :title="`记账成功：${success.document_no}，记账后库存 ${success.after_quantity} ${success.unit}`" type="success" :closable="false" show-icon />
+  </div>
+
+  <DataPanel v-if="!isStock && canWrite" :title="formTitle" :description="isReceipt ? '选择成品并填写数量，即可完成普通入库。' : '当前库存会实时显示，出库数量不能超过可用余额。'" kind="action">
     <el-form label-width="100px" :disabled="saving" @submit.prevent="submit">
-      <el-row :gutter="24"><el-col :span="12"><el-form-item label="成品" required><el-select v-model="form.product_id" remote filterable :remote-method="searchProducts" placeholder="输入成品编码或名称搜索" @change="selectProduct"><el-option v-for="item in products" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name}`" /></el-select></el-form-item></el-col>
-        <el-col :span="12"><el-form-item label="当前库存"><span>{{ selecting ? '查询中…' : selected ? `${selected.quantity} ${selected.unit}` : '请先选择成品' }}</span></el-form-item></el-col></el-row>
-      <el-row :gutter="24"><el-col :span="12"><el-form-item :label="isReceipt ? '入库数量' : '出库数量'" required><el-input v-model="form.quantity" inputmode="decimal" maxlength="21" placeholder="大于零，最多六位小数"><template #append>{{ selected?.unit || '单位' }}</template></el-input></el-form-item></el-col>
+      <el-row :gutter="20"><el-col :span="12"><el-form-item label="成品" required><el-select v-model="form.product_id" remote filterable :remote-method="searchProducts" placeholder="输入成品编码或名称搜索" @change="selectProduct"><el-option v-for="item in products" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name}`" /></el-select></el-form-item></el-col>
+        <el-col :span="12"><el-form-item label="当前库存"><span :class="selected ? 'stock-reading' : 'muted-value'">{{ selecting ? '查询中…' : selected ? `${selected.quantity} ${selected.unit}` : '请先选择成品' }}</span></el-form-item></el-col></el-row>
+      <el-row :gutter="20"><el-col :span="12"><el-form-item :label="isReceipt ? '入库数量' : '出库数量'" required><el-input v-model="form.quantity" inputmode="decimal" maxlength="21" placeholder="大于零，最多六位小数"><template #append>{{ selected?.unit || '单位' }}</template></el-input></el-form-item></el-col>
         <el-col :span="12"><el-form-item :label="isReceipt ? '入库日期' : '出库日期'" required><el-date-picker v-model="form.business_date" type="date" value-format="YYYY-MM-DD" /></el-form-item></el-col></el-row>
-      <el-row :gutter="24"><el-col :span="12"><el-form-item :label="isReceipt ? '入库类型' : '出库类型'"><el-select v-model="form.business_type"><el-option value="normal" :label="isReceipt ? '普通入库' : '普通出库'" /><el-option v-if="isReceipt" value="production" label="生产入库（请从生产单完成）" disabled /></el-select></el-form-item></el-col>
+      <el-row :gutter="20"><el-col :span="12"><el-form-item :label="isReceipt ? '入库类型' : '出库类型'"><el-select v-model="form.business_type"><el-option value="normal" :label="isReceipt ? '普通入库' : '普通出库'" /><el-option v-if="isReceipt" value="production" label="生产入库（请从生产单完成）" disabled /></el-select></el-form-item></el-col>
         <el-col :span="12"><el-form-item label="关联单据"><el-input v-model="form.reference_no" maxlength="120" placeholder="可选，填写外部单据编号" /></el-form-item></el-col></el-row>
       <el-form-item label="备注"><el-input v-model="form.notes" maxlength="2000" type="textarea" :rows="2" /></el-form-item>
-      <el-form-item><el-button type="primary" native-type="submit" :loading="saving" :disabled="selecting || !selected">{{ isReceipt ? '确认入库' : '确认出库' }}</el-button></el-form-item>
+      <el-form-item><el-button type="primary" size="large" native-type="submit" :loading="saving" :disabled="selecting || !selected">{{ isReceipt ? '确认入库' : '确认出库' }}</el-button></el-form-item>
     </el-form>
-  </el-card>
-  <el-alert v-if="!isStock && !canWrite" title="当前角色仅可查看记录，库存操作由仓库人员或管理员执行。" type="info" :closable="false" class="notice" />
-  <el-card shadow="never">
+  </DataPanel>
+
+  <el-alert v-if="!isStock && !canWrite" title="当前角色仅可查看记录，库存操作由仓库人员或管理员执行。" type="info" :closable="false" class="permission-notice" />
+
+  <DataPanel :title="listTitle" description="数量采用六位定点精度，库存余额和变动量突出显示。">
     <el-tabs v-if="isStock" v-model="stockTab" @tab-change="page=1; load()"><el-tab-pane label="当前库存" name="balance" /><el-tab-pane label="成品库存流水" name="ledger" /></el-tabs>
-    <el-form inline @submit.prevent="page=1; load()"><el-form-item label="搜索"><el-input v-model="q" maxlength="120" clearable placeholder="成品名称或编码" @clear="page=1; load()" /></el-form-item><el-button type="primary" native-type="submit">查询</el-button></el-form>
-    <el-table v-loading="loading" :data="rows" stripe row-key="id" empty-text="暂无记录"><el-table-column v-for="[key,label] in columns" :key="key" :label="label" :min-width="key.endsWith('_at') ? 175 : 120" show-overflow-tooltip><template #default="{row}">{{ display(row,key) }}</template></el-table-column><el-table-column v-if="!balanceView" label="详情" fixed="right" width="80"><template #default="{row}"><el-button type="primary" link @click="openDetail(row)">查看</el-button></template></el-table-column></el-table>
+    <FilterBar><el-form inline @submit.prevent="page=1; load()"><el-form-item label="搜索"><el-input v-model="q" maxlength="120" clearable placeholder="成品名称或编码" @clear="page=1; load()" /></el-form-item><el-form-item><el-button :icon="Search" type="primary" native-type="submit">查询</el-button></el-form-item></el-form></FilterBar>
+    <TableSkeleton v-if="loading && !rows.length" />
+    <el-table v-else v-loading="loading" :data="rows" stripe row-key="id"><el-table-column v-for="[key,label] in columns" :key="key" :label="label" :min-width="key.endsWith('_at') ? 175 : 120" show-overflow-tooltip><template #default="{row}"><span :class="{ 'data-value': isQuantityColumn(key) }">{{ display(row,key) }}</span></template></el-table-column><el-table-column v-if="!balanceView" label="详情" fixed="right" width="88"><template #default="{row}"><el-button :icon="View" type="primary" link @click="openDetail(row)">查看</el-button></template></el-table-column><template #empty><EmptyState title="暂无成品库存记录" description="当前查询条件下没有匹配的数据。" /></template></el-table>
     <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[10,20,50,100]" layout="total, sizes, prev, pager, next" class="pagination" @current-change="load" @size-change="page=1; load()" />
-  </el-card>
+  </DataPanel>
+
   <el-dialog v-model="detailOpen" title="成品库存单据详情" width="650px"><el-descriptions v-if="detail" :column="1" border><el-descriptions-item v-for="[key,label] in detailFields" :key="key" :label="label">{{ display(detail,key) }}</el-descriptions-item></el-descriptions></el-dialog>
 </template>
 
 <style scoped>
-.notice { margin-bottom: 20px; }
+.permission-notice { margin-bottom: 18px; }
+.stock-reading { color: #173963; font-size: 18px; font-variant-numeric: tabular-nums; font-weight: 700; }
 </style>
