@@ -1,11 +1,11 @@
 <script setup>
 import { computed } from 'vue'
-import { canAccess } from '../../permissions'
+import { canAccess, canOperate } from '../../permissions'
 import { auth } from '../../auth'
 
 const props = defineProps({ actions: { type: Array, default: () => [] } })
 // 同一路由权限函数用于菜单与首页入口；快捷操作只是导航，不绕过页面和 API 鉴权。
-const visibleActions = computed(() => props.actions.filter(action => canAccess(auth.user?.role, action.resource) && (!action.roles || action.roles.includes(auth.user?.role))))
+const visibleActions = computed(() => props.actions.filter(action => canAccess(auth.user?.role) && (!action.permission || canOperate(auth.user?.role, action.permission))))
 </script>
 
 <template>

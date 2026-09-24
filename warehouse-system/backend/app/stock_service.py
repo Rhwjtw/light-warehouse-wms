@@ -10,9 +10,9 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.auth import audit
+from app.auth import audit, require_permission
 from app.config import get_settings
-from app.models import (RawMaterial, Supplier, Location, Role, MaterialBatch,
+from app.models import (RawMaterial, Supplier, Location, MaterialBatch,
                         StockDocument, MaterialMovement, InventoryTransaction)
 from app.unit_conversion import MAX_QUANTITY, convert_quantity
 
@@ -56,8 +56,7 @@ def document_result(session, document):
 
 
 def post_material(session, user, payload, kind):
-    if session.get(Role, user.role_id).code not in ('admin', 'warehouse'):
-        raise HTTPException(403, '仅管理员和仓库人员可以操作库存')
+    require_permission(user, session, 'material.inventory.write')
     content = payload.model_dump(mode='json', exclude={'request_id'})
     # 请求指纹排除 request_id 本身；相同标识只有在操作者、类型和业务内容都一致时才可安全重放。
     content['quantity'] = format(payload.quantity.normalize(), 'f')

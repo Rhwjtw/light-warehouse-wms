@@ -11,14 +11,12 @@ router = APIRouter(prefix='/api', tags=['用户管理'])
 
 @router.get('/roles', response_model=Envelope)
 def roles(user: UserDep, session: SessionDep):
-    require_admin(user, session)
     return Envelope(data=[{'id': role.id, 'code': role.code, 'name': role.name} for role in session.scalars(select(Role).order_by(Role.id))])
 
 
 @router.get('/users', response_model=Envelope)
 def list_users(user: UserDep, session: SessionDep, q: str = Query('', max_length=120), page: int = Query(1, ge=1),
                page_size: int = Query(20, ge=1, le=100), is_active: bool | None = None):
-    require_admin(user, session)
     conditions = [User.deleted_at.is_(None)]
     if q.strip():
         conditions.append(or_(User.username.contains(q.strip(), autoescape=True), User.display_name.contains(q.strip(), autoescape=True)))
@@ -43,7 +41,6 @@ def valid_role(role_id, session):
 
 @router.get('/users/{identity}', response_model=Envelope)
 def detail(identity: int, user: UserDep, session: SessionDep):
-    require_admin(user, session)
     return Envelope(data=public_user(find_user(identity, session), session))
 
 

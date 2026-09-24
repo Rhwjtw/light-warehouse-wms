@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Search, View } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
+import { canOperate } from '../permissions'
 import DataPanel from '../components/ui/DataPanel.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
@@ -15,7 +16,7 @@ const route = useRoute()
 const resource = computed(() => route.meta.resource)
 const isStock = computed(() => resource.value === 'finished-stock')
 const isReceipt = computed(() => resource.value === 'finished-receipts')
-const canWrite = computed(() => ['admin', 'warehouse'].includes(auth.user?.role))
+const canWrite = computed(() => canOperate(auth.user?.role, 'finished.inventory.write'))
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 const form = reactive({ product_id: null, quantity: '', business_date: today(), business_type: 'normal', reference_no: '', notes: '' })
 const products = ref([]), selected = ref(null), selecting = ref(false), saving = ref(false)
@@ -137,7 +138,7 @@ watch(resource, async () => {
     </el-form>
   </DataPanel>
 
-  <el-alert v-if="!isStock && !canWrite" title="当前角色仅可查看记录，库存操作由仓库人员或管理员执行。" type="info" :closable="false" class="permission-notice" />
+  <el-alert v-if="!isStock && !canWrite" title="当前账号仅有查看权限。" type="info" :closable="false" class="permission-notice" />
 
   <DataPanel :title="listTitle" description="数量采用六位定点精度，库存余额和变动量突出显示。">
     <el-tabs v-if="isStock" v-model="stockTab" @tab-change="page=1; load()"><el-tab-pane label="当前库存" name="balance" /><el-tab-pane label="成品库存流水" name="ledger" /></el-tabs>

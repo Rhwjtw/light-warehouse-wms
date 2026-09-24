@@ -9,10 +9,10 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from app.auth import audit, require_admin
+from app.auth import audit, require_permission
 from app.models import (
     BomHeader, BomItem, FinishedProduct, InventoryTransaction, Location, MaterialBatch,
-    MaterialIssueRecord, ProductionOrder, ProductionOrderMaterial, RawMaterial, Role,
+    MaterialIssueRecord, ProductionOrder, ProductionOrderMaterial, RawMaterial,
     StockDocument, Supplier, User, utcnow,
 )
 from app.stock_service import business_today, fefo_conditions, fefo_order
@@ -129,7 +129,7 @@ def order_data(session, order: ProductionOrder, *, include_details: bool = True)
 
 
 def create_order(session, user, payload) -> dict:
-    require_admin(user, session)
+    require_permission(user, session, 'production.order.write')
     # 同时锁定成品和当前 ACTIVE BOM，避免创建过程中档案单位或配方状态被并发修改。
     product = session.scalar(select(FinishedProduct).where(
         FinishedProduct.id == payload.finished_product_id,
@@ -206,7 +206,7 @@ def create_order(session, user, payload) -> dict:
 
 
 def update_order(session, user, identity: int, payload) -> dict:
-    require_admin(user, session)
+    require_permission(user, session, 'production.order.write')
     order = find_order(session, identity, lock=True)
     if order.status in ('completed', 'received', 'cancelled'):
         raise HTTPException(409, '该生产单当前状态不允许修改')
@@ -220,7 +220,7 @@ def update_order(session, user, identity: int, payload) -> dict:
 
 
 def cancel_order(session, user, identity: int) -> dict:
-    require_admin(user, session)
+    require_permission(user, session, 'production.order.write')
     order = find_order(session, identity, lock=True)
     if order.status == 'cancelled':
         return order_data(session, order)
@@ -277,13 +277,10 @@ def create_inventory_transaction(session, **values):
 
 
 def post_material(session, user, order_id: int, payload, kind: str) -> dict:
-    role = session.get(Role, user.role_id)
-    # 车间可登记补料和退料，但正常领料仍限管理员/仓库；正式结算权限另行校验。
-    allowed = ('admin', 'warehouse', 'workshop') if kind in ('supplement', 'return') else ('admin', 'warehouse')
-    if role is None or role.code not in allowed:
-        raise HTTPException(403, '当前角色不能办理此生产物料操作')
     if kind not in ('issue', 'supplement', 'return'):
         raise ValueError('unsupported production material kind')
+    require_permission(user, session, {'issue': 'workshop.pick', 'supplement': 'workshop.replenish',
+                                       'return': 'workshop.return'}[kind])
     batch_ids = [row.batch_id for row in payload.allocations]
     if len(batch_ids) != len(set(batch_ids)):
         raise HTTPException(422, '同一次操作不能重复选择同一批次')

@@ -7,7 +7,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search, View } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
-import { canAdjustProduction } from '../permissions'
+import { canOperate } from '../permissions'
 import SettlementTable from '../components/SettlementTable.vue'
 import ProductionFlow from '../components/ProductionFlow.vue'
 import DataPanel from '../components/ui/DataPanel.vue'
@@ -23,7 +23,7 @@ async function registerActual() {
   registering.value = true; registerError.value = ''
   try {
     current.value = (await api.put(`/production-orders/${current.value.id}/actual-quantity`, { actual_quantity: registeredQuantity.value })).data
-    registerVisible.value = false; ElMessage.success('实际产量已登记，待仓库确认完成生产'); await load()
+    registerVisible.value = false; ElMessage.success('实际产量已登记，待确认完成生产'); await load()
   } catch (e) { registerError.value = e.message } finally { registering.value = false }
 }
 const completeVisible = ref(false), completing = ref(false), settling = ref(false)
@@ -54,8 +54,12 @@ async function finishProduction() {
 }
 
 const route = useRoute()
-const canCreate = computed(() => auth.user?.role === 'admin')
-const canPost = computed(() => ['admin', 'warehouse'].includes(auth.user?.role))
+const canCreate = computed(() => canOperate(auth.user?.role, 'production.order.write'))
+const canManage = computed(() => canOperate(auth.user?.role, 'production.manage'))
+const canPick = computed(() => canOperate(auth.user?.role, 'workshop.pick'))
+const canReplenish = computed(() => canOperate(auth.user?.role, 'workshop.replenish'))
+const canReturn = computed(() => canOperate(auth.user?.role, 'workshop.return'))
+const canPostMaterial = computed(() => canPick.value || canReplenish.value || canReturn.value)
 const rows = ref([]), total = ref(0), loading = ref(false), error = ref('')
 const query = ref(''), status = ref(''), page = ref(1), pageSize = ref(20)
 const products = ref([])
@@ -270,8 +274,8 @@ onMounted(() => { load(); loadProducts() })
         <ProductionFlow :order="current" />
         <div v-if="['ready','in_progress'].includes(current.status)" class="production-primary-actions">
           <span>下一步操作</span>
-          <el-button v-if="canAdjustProduction(auth.user?.role)" @click="openRegister">登记实际产量</el-button>
-          <el-button v-if="canPost" type="primary" @click="openComplete">预览并完成生产</el-button>
+          <el-button v-if="canManage" @click="openRegister">登记实际产量</el-button>
+          <el-button v-if="canManage" type="primary" @click="openComplete">预览并完成生产</el-button>
         </div>
         <h3>原材料需求与当前净领用</h3>
         <el-table :data="current.materials" border stripe row-key="id">
@@ -282,7 +286,7 @@ onMounted(() => { load(); loadProducts() })
           <el-table-column label="补料" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.supplemented_quantity, row.base_unit) }}</span></template></el-table-column>
           <el-table-column label="退料" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.returned_quantity, row.base_unit) }}</span></template></el-table-column>
           <el-table-column label="当前净领用" min-width="145"><template #default="{row}"><strong class="data-value">{{ amount(row.net_issued_quantity, row.base_unit) }}</strong></template></el-table-column>
-          <el-table-column v-if="canAdjustProduction(auth.user?.role) && ['ready','in_progress'].includes(current.status)" label="操作" width="175" fixed="right"><template #default="{row}"><el-button v-if="canPost" link type="primary" @click="openAction('issue',row)">领料</el-button><el-button link type="warning" @click="openAction('supplement',row)">补料</el-button><el-button link type="success" @click="openAction('return',row)">退料</el-button></template></el-table-column>
+          <el-table-column v-if="canPostMaterial && ['ready','in_progress'].includes(current.status)" label="操作" width="175" fixed="right"><template #default="{row}"><el-button v-if="canPick" link type="primary" @click="openAction('issue',row)">领料</el-button><el-button v-if="canReplenish" link type="warning" @click="openAction('supplement',row)">补料</el-button><el-button v-if="canReturn" link type="success" @click="openAction('return',row)">退料</el-button></template></el-table-column>
         </el-table>
         <template v-if="current.status === 'completed'"><h3>原材料结算</h3><SettlementTable :rows="current.materials" /></template>
         <h3>生产单信息</h3>

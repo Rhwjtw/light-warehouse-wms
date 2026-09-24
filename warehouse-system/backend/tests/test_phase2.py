@@ -29,7 +29,7 @@ def context():
             with session.begin():
                 yield session
     with Session(bind=connection, join_transaction_mode='create_savepoint') as session:
-        for code in ('admin', 'warehouse', 'workshop'):
+        for code in ('admin', 'warehouse', 'workshop_director', 'workshop', 'accountant'):
             role = session.scalar(select(Role).where(Role.code == code))
             user = User(username=prefix+'_'+code, display_name=code, role_id=role.id, password_hash=hash_password(PASSWORD))
             session.add(user); session.flush()
@@ -95,23 +95,28 @@ def test_invalid_quantities_units_and_inventory_injection(context):
     client, headers, _, _, prefix = context
     base = {'code': prefix, 'name': '校验', 'unit': 'kg'}
     for change in ({'min_stock': '-1'}, {'min_stock': '1.1234567'}, {'min_stock': 'NaN'}, {'min_stock': 1.2},
-                   {'min_stock': True}, {'unit': '吨'}, {'unit': '盒'}, {'remaining_quantity': '100'}, {'name': '   '}):
+                   {'min_stock': True}, {'unit': '   '}, {'unit': 'x' * 17},
+                   {'remaining_quantity': '100'}, {'name': '   '}):
         response = client.post('/api/materials', headers=headers['admin'], json={**base, **change})
         assert response.status_code == 422, response.text
-    assert client.post('/api/products', headers=headers['admin'], json={**base, 'unit': 'kg'}).status_code == 422
+    assert client.post('/api/products', headers=headers['admin'], json={**base, 'unit': '   '}).status_code == 422
 
 
-@pytest.mark.parametrize('role', ['warehouse', 'workshop'])
-def test_non_admin_cannot_write_or_manage_users(context, role):
+@pytest.mark.parametrize('role', ['warehouse', 'workshop', 'workshop_director', 'accountant'])
+def test_role_archive_permissions_and_user_read_only(context, role):
     client, headers, users, _, prefix = context
     for resource in ('materials', 'products', 'suppliers', 'locations'):
         assert client.get('/api/'+resource, headers=headers[role]).status_code == 200
         payload = {'code': prefix, 'name': '越权', **({'unit': 'kg'} if resource == 'materials' else {})}
-        assert client.post('/api/'+resource, headers=headers[role], json=payload).status_code == 403
-        assert client.put('/api/'+resource+'/1', headers=headers[role], json=payload).status_code == 403
-        assert client.delete('/api/'+resource+'/1', headers=headers[role]).status_code == 403
-    assert client.get('/api/users', headers=headers[role]).status_code == 403
-    assert client.get('/api/roles', headers=headers[role]).status_code == 403
+        allowed = resource in ({'warehouse': {'materials', 'products', 'suppliers', 'locations'},
+                                'workshop_director': set(), 'workshop': set(),
+                                'accountant': {'materials', 'products', 'suppliers'}}[role])
+        assert client.post('/api/'+resource, headers=headers[role], json=payload).status_code == (200 if allowed else 403)
+        if not allowed:
+            assert client.put('/api/'+resource+'/1', headers=headers[role], json=payload).status_code == 403
+            assert client.delete('/api/'+resource+'/1', headers=headers[role]).status_code == 403
+    assert client.get('/api/users', headers=headers[role]).status_code == 200
+    assert client.get('/api/roles', headers=headers[role]).status_code == 200
     assert client.post(f"/api/users/{users['admin']['id']}/password", headers=headers[role], json={'new_password': PASSWORD}).status_code == 403
 
 

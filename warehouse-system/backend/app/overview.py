@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import case, func, or_, select
 
-from app.auth import SessionDep, UserDep, audit, require_admin
+from app.auth import SessionDep, UserDep, audit, require_permission
 from app.config import get_settings
 from app.models import (WarningRule, MaterialBatch as Batch, RawMaterial, FinishedProduct,
                         FinishedBatch, ProductionOrder, InventoryTransaction as Ledger,
@@ -56,13 +56,12 @@ def date_bounds(start, end):
 
 @router.get('/settings/expiry', response_model=Envelope)
 def read_settings(user: UserDep, session: SessionDep):
-    require_admin(user, session)
     return Envelope(data=rule_data(thresholds(session)))
 
 
 @router.put('/settings/expiry', response_model=Envelope)
 def write_settings(payload: ExpirySettings, user: UserDep, session: SessionDep):
-    require_admin(user, session)
+    require_permission(user, session, 'settings.manage')
     rows = thresholds(session, lock=True)
     before = rule_data(rows)
     rows['expiry_near'].days = payload.urgent_expiry_days
@@ -169,7 +168,6 @@ def logs(user: UserDep, session: SessionDep, username: str = Query('', max_lengt
          module: str = Query('', max_length=64), action: str = Query('', max_length=80),
          q: str = Query('', max_length=120), date_from: date | None = None, date_to: date | None = None,
          page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
-    require_admin(user, session)
     start, end = date_bounds(date_from, date_to)
     query = select(OperationLog.id, OperationLog.user_id, OperationLog.username_snapshot,
                    OperationLog.entity_type.label('module'), OperationLog.action,

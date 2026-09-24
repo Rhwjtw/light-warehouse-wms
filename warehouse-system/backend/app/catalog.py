@@ -1,8 +1,9 @@
 """四类基础档案共用简单的搜索、分页和审计逻辑，不提供库存数字编辑。"""
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
-from app.auth import SessionDep, UserDep, audit, require_admin
+from app.auth import SessionDep, UserDep, audit, require_permission
 from app.database import Base
 from app.models import FinishedProduct, Location, RawMaterial, Supplier, Unit, utcnow
 from app.schemas import ArchiveInput, Envelope, MaterialInput, ProductInput, SupplierInput
@@ -43,14 +44,19 @@ def units(user: UserDep, session: SessionDep):
 
 
 def register_catalog(path, model, schema, label):
+    permission = {
+        RawMaterial: 'material.archive.write', FinishedProduct: 'finished.archive.write',
+        Supplier: 'supplier.write', Location: 'location.write',
+    }[model]
+
     def validate(payload, session, existing=None):
         if hasattr(payload, 'unit'):
-            unit = session.get(Unit, payload.unit)
-            allowed = ('kg', 'g', 'L', 'mL', '个') if model is RawMaterial else ('盒', '瓶', '支', '套', '个')
-            if unit is None or payload.unit not in allowed:
-                raise HTTPException(422, '请选择支持的单位')
             if existing and existing.unit != payload.unit and is_referenced(session, model, existing.id):
                 raise HTTPException(409, '该档案已被库存或配方引用，不能更改单位；请新建档案')
+            if session.get(Unit, payload.unit) is None:
+                # 未知单位只与自身兼容；同名并发创建使用主键去重。
+                session.execute(mysql_insert(Unit).values(code=payload.unit, dimension='u:' + payload.unit,
+                                                  factor=1).prefix_with('IGNORE'))
 
     def find(identity, session, lock=False):
         query = select(model).where(model.id == identity, model.deleted_at.is_(None))
@@ -77,7 +83,7 @@ def register_catalog(path, model, schema, label):
         return Envelope(data=public_record(find(identity, session)))
 
     def create_record(payload: schema, user: UserDep, session: SessionDep):
-        require_admin(user, session)
+        require_permission(user, session, permission)
         validate(payload, session)
         record = model(**payload.model_dump())
         session.add(record)
@@ -86,7 +92,7 @@ def register_catalog(path, model, schema, label):
         return Envelope(data=public_record(record))
 
     def update_record(identity: int, payload: schema, user: UserDep, session: SessionDep):
-        require_admin(user, session)
+        require_permission(user, session, permission)
         record = find(identity, session, True)
         validate(payload, session, record)
         for field, value in payload.model_dump().items():
@@ -96,7 +102,7 @@ def register_catalog(path, model, schema, label):
         return Envelope(data=public_record(record))
 
     def delete_record(identity: int, user: UserDep, session: SessionDep):
-        require_admin(user, session)
+        require_permission(user, session, permission)
         record = find(identity, session, True)
         if is_referenced(session, model, identity):
             raise HTTPException(409, '该档案已被业务引用，请使用停用，不能删除')

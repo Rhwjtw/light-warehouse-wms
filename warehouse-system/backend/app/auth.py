@@ -1,4 +1,4 @@
-"""简单三角色认证；JWT 每次请求核对数据库，停用/改密立即撤销旧令牌。"""
+"""固定角色权限认证；JWT 每次请求核对数据库，停用/改密立即撤销旧令牌。"""
 import hashlib
 import hmac
 import secrets
@@ -17,6 +17,7 @@ from app.database import get_session
 from app.models import OperationLog, Role, User
 from app.schemas import Envelope, LoginInput, PasswordChange
 from app.audit_labels import ACTIONS, MODULES
+from app.permissions import can_operate
 
 SessionDep = Annotated[Session, Depends(get_session, scope='function')]
 bearer = HTTPBearer(auto_error=False)
@@ -93,9 +94,13 @@ def require_admin(user, session, *, serialize_users=False):
         # 用户权限修改按管理员角色行串行，防止两个管理员相互停用后系统失去管理员。
         session.scalar(select(Role).where(Role.code == 'admin').with_for_update())
         session.refresh(user)
-    if not user.is_active or user.deleted_at or session.get(Role, user.role_id).code != 'admin':
-        # 前端隐藏菜单仅改善体验，真正的权限边界必须在每个写接口的服务端执行。
-        raise HTTPException(403, '仅管理员可以执行此操作')
+    require_permission(user, session, 'user.manage')
+
+
+def require_permission(user, session, permission: str):
+    role = session.get(Role, user.role_id)
+    if not user.is_active or user.deleted_at or role is None or not can_operate(role.code, permission):
+        raise HTTPException(403, '当前账号仅有查看权限')
 
 
 @router.post('/login', response_model=Envelope)

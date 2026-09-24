@@ -4,8 +4,8 @@ from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, or_, select
 
-from app.auth import SessionDep, UserDep, audit
-from app.models import ProductionOrder, Role
+from app.auth import SessionDep, UserDep, audit, require_permission
+from app.models import ProductionOrder
 from app.production_service import (
     cancel_order, create_order, fefo_suggestion, find_order, order_data,
     post_material, update_order,
@@ -22,9 +22,8 @@ router = APIRouter(prefix='/api/production-orders', tags=['生产单'])
 
 @router.put('/{identity}/actual-quantity', response_model=Envelope)
 def register_actual(identity: int, payload: ProductionCompleteInput, user: UserDep, session: SessionDep):
-    # 登记实际产量只保存车间上报值，不结算、不改变成品库存；正式完工仍由管理员/仓库执行。
-    if session.get(Role, user.role_id).code not in ('admin', 'warehouse', 'workshop'):
-        raise HTTPException(403, '当前角色不能登记产量')
+    # 登记实际产量只保存车间上报值，不结算、不改变成品库存。
+    require_permission(user, session, 'production.manage')
     order = find_order(session, identity, lock=True)
     if order.status not in ('ready', 'in_progress'):
         raise HTTPException(409, '当前生产单不能修改实际产量')
@@ -36,7 +35,7 @@ def register_actual(identity: int, payload: ProductionCompleteInput, user: UserD
 
 @router.post('/{identity}/settlement-preview', response_model=Envelope)
 def preview(identity: int, payload: ProductionCompleteInput, user: UserDep, session: SessionDep):
-    # 预览与正式结算共用公式和权限，但不会持久化任何计算结果。
+    # 预览与正式结算共用公式，不会持久化计算结果，所有已登录用户均可查看。
     return Envelope(data=settlement_preview(session, user, identity, payload))
 
 

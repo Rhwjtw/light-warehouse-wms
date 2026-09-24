@@ -4,7 +4,7 @@ from decimal import Decimal, localcontext
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import delete, func, or_, select
 
-from app.auth import SessionDep, UserDep, audit, require_admin
+from app.auth import SessionDep, UserDep, audit, require_permission
 from app.models import BomHeader, BomItem, FinishedProduct, ProductionOrder, RawMaterial, utcnow
 from app.schemas import BomCalculateInput, BomInput, Envelope
 from app.unit_conversion import get_compatible_units, normalize_quantity
@@ -191,7 +191,7 @@ def get_bom(identity: int, user: UserDep, session: SessionDep):
 
 @router.post('/boms', response_model=Envelope)
 def create_bom(payload: BomInput, user: UserDep, session: SessionDep):
-    require_admin(user, session)
+    require_permission(user, session, 'bom.write')
     product, _ = validate_payload(session, payload)
     bom = BomHeader(product_id=product.id, version=payload.version, status=payload.status,
                     output_unit=product.unit, notes=payload.notes)
@@ -211,7 +211,7 @@ def create_bom(payload: BomInput, user: UserDep, session: SessionDep):
 
 @router.put('/boms/{identity}', response_model=Envelope)
 def update_bom(identity: int, payload: BomInput, user: UserDep, session: SessionDep):
-    require_admin(user, session)
+    require_permission(user, session, 'bom.write')
     bom = find_bom(session, identity, lock=True)
     referenced = session.scalar(select(ProductionOrder.id).where(ProductionOrder.bom_id == bom.id).limit(1)) is not None
     current_items = session.scalars(select(BomItem).where(BomItem.bom_id == bom.id).order_by(BomItem.sort_order, BomItem.id)).all()

@@ -1,10 +1,14 @@
-export function canAccess(role, resource = '') {
-  // 前端权限只控制菜单、路由和按钮可见性；后端接口仍独立执行同一角色边界。
-  if (!['admin', 'warehouse', 'workshop'].includes(role)) return false
-  if (role === 'admin') return true
-  if (['users', 'settings', 'logs'].includes(resource)) return false
-  return role !== 'workshop' || !['material-receipts', 'material-outbounds', 'finished-receipts', 'finished-outbounds', 'issues'].includes(resource)
+// 已登录用户可查看全部页面；角色仅决定哪些业务动作可提交。
+export const rolePermissions = {
+  admin: ['*'],
+  warehouse: ['material.archive.write', 'material.inventory.write', 'finished.archive.write', 'finished.inventory.write', 'supplier.write', 'location.write'],
+  workshop_director: ['bom.write', 'production.order.write', 'production.manage', 'workshop.pick', 'workshop.replenish', 'workshop.return'],
+  workshop: ['workshop.pick', 'workshop.replenish', 'workshop.return'],
+  accountant: ['material.archive.write', 'finished.archive.write', 'bom.write', 'production.order.write', 'supplier.write'],
 }
-export const canIssue = role => ['admin', 'warehouse'].includes(role)
-// 车间可以补料、退料和登记实际产量，但不能正常领料或正式完工入库。
-export const canAdjustProduction = role => ['admin', 'warehouse', 'workshop'].includes(role)
+
+export const canAccess = role => Object.hasOwn(rolePermissions, role)
+export const canOperate = (role, permission) => {
+  const granted = rolePermissions[role] || []
+  return granted.includes('*') || granted.includes(permission)
+}

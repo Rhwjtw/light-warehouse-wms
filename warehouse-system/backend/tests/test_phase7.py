@@ -22,7 +22,7 @@ def setup_order(context, suffix='settle', quantity='20', **kwargs):
     return data
 
 
-def settle(data, quantity='980', action='complete', role='warehouse', **extra):
+def settle(data, quantity='980', action='complete', role='workshop_director', **extra):
     return data['client'].post(f"/api/production-orders/{data['order']['id']}/{action}",
                                headers=data['headers'][role], json={'actual_quantity': quantity, **extra})
 
@@ -155,7 +155,7 @@ def test_cancelled_no_material_and_permissions(context):
     assert settle(data).status_code == 409
     data = setup_order(context, 'permissions')
     assert settle(data, role='workshop').status_code == 403
-    assert settle(data, action='settlement-preview', role='workshop').status_code == 403
+    assert settle(data, action='settlement-preview', role='workshop').status_code == 200
 
 
 @pytest.mark.parametrize('quantity', ['0','-1','NaN','Infinity','0.0000001','100000000000000',0.1,True])

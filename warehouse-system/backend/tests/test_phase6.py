@@ -33,7 +33,7 @@ def context():
 
     with Session(bind=connection, join_transaction_mode='create_savepoint') as session:
         usernames = {}
-        for code in ('admin', 'warehouse', 'workshop'):
+        for code in ('admin', 'warehouse', 'workshop_director', 'workshop', 'accountant'):
             role = session.scalar(select(Role).where(Role.code == code))
             user = User(username=f'{prefix}_{code}', display_name=code, role_id=role.id,
                         password_hash=hash_password(PASSWORD))
@@ -105,7 +105,7 @@ def scenario(context, suffix, *, bom_quantities=('20',), stock_batches=()):
     }
 
 
-def post_material(data, kind, order_material_id, allocations, *, role='warehouse', unit='kg', request_id=None):
+def post_material(data, kind, order_material_id, allocations, *, role='workshop_director', unit='kg', request_id=None):
     return data['client'].post(
         f"/api/production-orders/{data['order']['id']}/{kind}", headers=data['headers'][role],
         json={'request_id': request_id or uuid4().hex, 'order_material_id': order_material_id,

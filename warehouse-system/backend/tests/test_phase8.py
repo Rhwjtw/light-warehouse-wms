@@ -66,11 +66,11 @@ def test_invalid_settings(context, urgent, warning):
     assert r.status_code == 422 and get(context, 'settings/expiry') == before
 
 
-@pytest.mark.parametrize('role', ['warehouse','workshop'])
+@pytest.mark.parametrize('role', ['warehouse','workshop_director','workshop','accountant'])
 def test_api_permission_boundaries(context, role):
     client, headers, _, _ = context
     for path in ('users','operation-logs','settings/expiry'):
-        assert client.get('/api/'+path, headers=headers[role]).status_code == 403
+        assert client.get('/api/'+path, headers=headers[role]).status_code == 200
         assert client.get('/api/'+path).status_code == 401
     assert client.put('/api/settings/expiry', headers=headers[role], json={'urgent_expiry_days':30,'warning_expiry_days':90}).status_code == 403
     for path in ('dashboard/summary','dashboard/recent-transactions','dashboard/recent-production-orders','alerts/expiry'):
@@ -84,20 +84,20 @@ def test_workshop_registration_and_complete_audit(context):
     data = scenario(context, 'workshop', stock_batches=((0,'30',60),))
     row = data['order']['materials'][0]
     args = (row['id'], [{'batch_id':data['batches'][0], 'quantity':'20'}])
-    assert post_material(data, 'issue', *args, role='workshop').status_code == 403
-    assert post_material(data, 'issue', *args).status_code == 200
+    assert post_material(data, 'issue', *args, role='workshop').status_code == 200
     for kind, quantity in [('supplement','1.2'),('return','0.5')]:
         assert post_material(data, kind, row['id'], [{'batch_id':data['batches'][0], 'quantity':quantity}], role='workshop').status_code == 200
     client, headers, _, _ = context
     path = f"/api/production-orders/{data['order']['id']}/actual-quantity"
-    response = client.put(path, headers=headers['workshop'], json={'actual_quantity':'980'})
+    assert client.put(path, headers=headers['workshop'], json={'actual_quantity':'980'}).status_code == 403
+    response = client.put(path, headers=headers['workshop_director'], json={'actual_quantity':'980'})
     assert response.status_code == 200 and response.json()['data']['actual_quantity'] == '980'
     assert detail(data)['status'] == 'in_progress'
     assert settle(data, role='workshop').status_code == 403
     completed = settle(data)
     assert completed.status_code == 200
     assert completed.json()['data']['materials'][0]['loss_quantity'] == '1.1'
-    assert client.put(path, headers=headers['workshop'], json={'actual_quantity':'1000'}).status_code == 409
+    assert client.put(path, headers=headers['workshop_director'], json={'actual_quantity':'1000'}).status_code == 409
     for action in ('material_receipt','production_issue','production_supplement','production_return','register_actual_quantity','complete_production_order'):
         result = get(context, 'operation-logs', action=action, q=str(data['order']['id']) if action in ('complete_production_order','register_actual_quantity') else '')
         assert result['total'] > 0

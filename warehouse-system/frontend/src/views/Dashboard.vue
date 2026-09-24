@@ -15,15 +15,15 @@ const data = ref(null), transactions = ref([]), orders = ref([]), loading = ref(
 const materialStock = ref([]), finishedStock = ref([]), stockLoading = ref(false)
 const materialStockError = ref(''), finishedStockError = ref('')
 const actions = [
-  { resource: 'material-receipts', to: '/material-receipts', label: '原材料入库', description: '按批次登记', icon: Download },
-  { resource: 'material-outbounds', to: '/material-outbounds', label: '原材料出库', description: '选择可用批次', icon: Upload },
-  { resource: 'finished-receipts', to: '/finished-receipts', label: '成品入库', description: '普通入库记账', icon: Goods },
-  { resource: 'finished-outbounds', to: '/finished-outbounds', label: '成品出库', description: '核对当前余额', icon: Box },
-  { resource: 'orders', to: '/orders', label: '新建生产单', description: '核对 BOM 与计划数量', icon: Plus, roles: ['admin'] },
-  { resource: 'orders', to: '/orders', label: '生产任务', description: '查看与处理生产单', icon: Files, roles: ['warehouse', 'workshop'] },
-  { resource: 'issues', to: '/issues', label: '生产领料', description: '按批次领取', icon: Files },
-  { resource: 'supplements', to: '/supplements', label: '生产补料', description: '登记追加用料', icon: Finished },
-  { resource: 'returns', to: '/returns', label: '生产退料', description: '退回原领用批次', icon: Upload },
+  { resource: 'material-receipts', to: '/material-receipts', label: '原材料入库', description: '按批次登记', icon: Download, permission: 'material.inventory.write' },
+  { resource: 'material-outbounds', to: '/material-outbounds', label: '原材料出库', description: '选择可用批次', icon: Upload, permission: 'material.inventory.write' },
+  { resource: 'finished-receipts', to: '/finished-receipts', label: '成品入库', description: '普通入库记账', icon: Goods, permission: 'finished.inventory.write' },
+  { resource: 'finished-outbounds', to: '/finished-outbounds', label: '成品出库', description: '核对当前余额', icon: Box, permission: 'finished.inventory.write' },
+  { resource: 'orders', to: '/orders', label: '新建生产单', description: '核对 BOM 与计划数量', icon: Plus, permission: 'production.order.write' },
+  { resource: 'orders', to: '/orders', label: '生产任务', description: '查看与处理生产单', icon: Files },
+  { resource: 'issues', to: '/issues', label: '生产领料', description: '按批次领取', icon: Files, permission: 'workshop.pick' },
+  { resource: 'supplements', to: '/supplements', label: '生产补料', description: '登记追加用料', icon: Finished, permission: 'workshop.replenish' },
+  { resource: 'returns', to: '/returns', label: '生产退料', description: '退回原领用批次', icon: Upload, permission: 'workshop.return' },
   { resource: 'expiry', to: '/expiry', label: '有效期预警', description: '查看临期批次', icon: Calendar },
 ]
 const alerts = computed(() => data.value ? [

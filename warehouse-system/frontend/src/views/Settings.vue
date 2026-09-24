@@ -1,12 +1,15 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { auth } from '../auth'
+import { canOperate } from '../permissions'
 import DataPanel from '../components/ui/DataPanel.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 const form = reactive({ urgent_expiry_days: null, warning_expiry_days: null })
+const canWrite = computed(() => canOperate(auth.user?.role, 'settings.manage'))
 const loading = ref(false), saving = ref(false), error = ref(''), ready = ref(false)
 async function load() {
   loading.value = true; error.value = ''
@@ -29,7 +32,8 @@ onMounted(load)
   <div class="settings-layout">
     <DataPanel title="有效期预警" description="按剩余天数分为严重临期与一般临期，到期当天仍视为有效。">
       <div class="settings-group-heading"><span>预警区间</span><StatusBadge tone="success" label="保存后立即生效" /></div>
-      <el-form v-loading="loading" label-position="top" :disabled="saving || !ready" class="settings-form" @submit.prevent="save">
+      <el-alert v-if="!canWrite" title="当前账号仅有查看权限。" type="info" :closable="false" />
+      <el-form v-loading="loading" label-position="top" :disabled="saving || !ready || !canWrite" class="settings-form" @submit.prevent="save">
         <div class="settings-field">
           <el-form-item label="严重临期天数"><el-input-number v-model="form.urgent_expiry_days" :min="1" :max="36500" :precision="0" /> <span class="settings-unit">天</span></el-form-item>
           <p>剩余天数在此范围内的批次显示为严重临期。</p>
@@ -38,7 +42,7 @@ onMounted(load)
           <el-form-item label="一般临期天数"><el-input-number v-model="form.warning_expiry_days" :min="1" :max="36500" :precision="0" /> <span class="settings-unit">天</span></el-form-item>
           <p>超过严重临期、但仍在此范围内的批次显示为一般临期。</p>
         </div>
-        <div class="settings-actions"><el-button native-type="submit" type="primary" :loading="saving" :disabled="!ready">{{ saving ? '正在保存' : '保存设置' }}</el-button><span>严重临期须大于 0，且小于一般临期天数。</span></div>
+        <div v-if="canWrite" class="settings-actions"><el-button native-type="submit" type="primary" :loading="saving" :disabled="!ready">{{ saving ? '正在保存' : '保存设置' }}</el-button><span>严重临期须大于 0，且小于一般临期天数。</span></div>
       </el-form>
     </DataPanel>
     <DataPanel title="影响范围" description="这些提示用于解释现有规则，不改变库存或历史记录。">

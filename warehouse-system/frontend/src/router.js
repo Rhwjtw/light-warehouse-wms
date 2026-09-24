@@ -30,13 +30,13 @@ const router = createRouter({
     { path: '/', component: Dashboard, meta: { title: '首页' } },
     ...menuGroups.flatMap(group => group.items.map(([path, label]) => ({
       path: `/${path}`, component: path === 'expiry' ? Expiry : path === 'settings' ? Settings : path === 'logs' ? OperationLogs : path === 'losses' ? Losses : path === 'boms' ? Boms : ['orders','issues','supplements','returns'].includes(path) ? ProductionOrders : ['finished-receipts','finished-outbounds','finished-stock'].includes(path) ? FinishedInventory : ['material-receipts','material-outbounds','material-stock','batches','material-transactions'].includes(path) ? MaterialInventory : path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : Dashboard,
-      meta: { title: label, group: group.label, resource: path, admin: ['users', 'settings', 'logs'].includes(path) },
+      meta: { title: label, group: group.label, resource: path },
     }))),
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 router.beforeEach(async to => {
-  // 页面守卫先恢复服务端确认过的登录态，再按角色过滤路由；它不是后端鉴权的替代品。
+  // 页面守卫确认登录态；写入权限由页面按钮和服务端接口分别检查。
   if (to.meta.public) return true
   try {
     if (!await restoreAuth()) return { path: '/login', query: { redirect: to.fullPath } }

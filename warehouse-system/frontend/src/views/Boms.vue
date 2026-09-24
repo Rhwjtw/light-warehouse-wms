@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
+import { canOperate } from '../permissions'
 import DataPanel from '../components/ui/DataPanel.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
@@ -11,7 +12,7 @@ import PageHeader from '../components/ui/PageHeader.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import TableSkeleton from '../components/ui/TableSkeleton.vue'
 
-const admin = computed(() => auth.user?.role === 'admin')
+const canWrite = computed(() => canOperate(auth.user?.role, 'bom.write'))
 const rows = ref([]), total = ref(0), page = ref(1), pageSize = ref(20), loading = ref(false)
 const query = ref(''), status = ref(''), loadError = ref('')
 const products = ref([]), materials = ref([]), units = ref([])
@@ -53,7 +54,7 @@ function compatibleUnits(item) {
   // 下拉框只展示同维度单位以减少误选；真正的跨维度拒绝仍由服务端统一换算模块负责。
   const material = selectedMaterial(item.material_id)
   const source = units.value.find(unit => unit.code === material?.unit)
-  return source ? units.value.filter(unit => unit.dimension === source.dimension) : []
+  return source ? units.value.filter(unit => unit.dimension === source.dimension) : material ? [{ code: material.unit }] : []
 }
 function addItem() { form.items.push({ material_id: null, quantity_per_unit: '', unit: '', notes: '' }) }
 function selectMaterial(item) {
@@ -147,7 +148,7 @@ onMounted(async () => {
 
 <template>
   <PageHeader eyebrow="生产管理" title="BOM 配方" description="按每 1 个成品档案单位维护原料用量；理论试算只读取配方，不改变库存。">
-    <template #actions><el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button><el-button v-if="admin" :icon="Plus" type="primary" @click="open('create')">新建 BOM</el-button></template>
+    <template #actions><el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button><el-button v-if="canWrite" :icon="Plus" type="primary" @click="open('create')">新建 BOM</el-button></template>
   </PageHeader>
   <DataPanel title="配方版本" description="按成品查看版本、原料明细和启用状态。">
     <FilterBar><el-form inline class="search-bar" @submit.prevent="search">
@@ -164,11 +165,11 @@ onMounted(async () => {
       <el-table-column prop="version" label="版本" width="80"><template #default="{row}"><span class="data-value">V{{ row.version }}</span></template></el-table-column>
       <el-table-column prop="item_count" label="原料数" width="90" />
       <el-table-column label="状态" width="100"><template #default="{row}"><StatusBadge :tone="statusType[row.status]" :label="statusText[row.status] || row.status" /></template></el-table-column>
-      <el-table-column label="操作" :width="admin ? 245 : 125" fixed="right"><template #default="{row}">
+      <el-table-column label="操作" :width="canWrite ? 245 : 125" fixed="right"><template #default="{row}">
         <el-button link type="primary" @click="open('view', row)">查看</el-button><el-button link type="primary" @click="tryRow(row)">试算</el-button>
-        <el-button v-if="admin" link type="primary" @click="open('edit', row)">编辑</el-button>
-        <el-button v-if="admin && row.status !== 'active'" link type="success" @click="setStatus(row, 'active')">启用</el-button>
-        <el-button v-if="admin && row.status === 'active'" link type="warning" @click="setStatus(row, 'inactive')">停用</el-button>
+        <el-button v-if="canWrite" link type="primary" @click="open('edit', row)">编辑</el-button>
+        <el-button v-if="canWrite && row.status !== 'active'" link type="success" @click="setStatus(row, 'active')">启用</el-button>
+        <el-button v-if="canWrite && row.status === 'active'" link type="warning" @click="setStatus(row, 'inactive')">停用</el-button>
       </template></el-table-column>
       <template #empty><EmptyState title="暂无 BOM 配方" description="可调整查询条件；管理员也可新建配方。" /></template>
     </el-table>

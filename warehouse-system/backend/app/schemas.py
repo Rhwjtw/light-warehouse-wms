@@ -18,6 +18,8 @@ class InputModel(BaseModel):
 
 Code = Annotated[str, StringConstraints(min_length=1, max_length=40, pattern=r'^[A-Za-z0-9][A-Za-z0-9_.-]*$')]
 Name = Annotated[str, StringConstraints(min_length=1, max_length=120)]
+UnitCode = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=16,
+                                           pattern=r'^[^\x00-\x1f\x7f]+$')]
 Username = Annotated[str, StringConstraints(min_length=3, max_length=64, pattern=r'^[A-Za-z0-9][A-Za-z0-9_.-]*$')]
 # 不裁剪密码；用户输入的空格也是密码的一部分。
 Password = Annotated[str, StringConstraints(strip_whitespace=False, min_length=10, max_length=128)]
@@ -41,13 +43,13 @@ class ArchiveInput(InputModel):
 
 
 class MaterialInput(ArchiveInput):
-    unit: str = Field(min_length=1, max_length=16)
+    unit: UnitCode
     specification: str | None = Field(default=None, max_length=200)
     min_stock: Quantity = Decimal('0')
 
 
 class ProductInput(MaterialInput):
-    unit: str = Field(default='盒', min_length=1, max_length=16)
+    unit: UnitCode = '盒'
 
 
 class SupplierInput(ArchiveInput):

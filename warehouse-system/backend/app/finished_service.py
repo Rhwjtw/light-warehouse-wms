@@ -8,9 +8,9 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.auth import audit
+from app.auth import audit, require_permission
 from app.models import (FinishedProduct, FinishedBatch, FinishedReceipt, FinishedOutbound,
-                        StockDocument, InventoryTransaction, Role)
+                        StockDocument, InventoryTransaction)
 from app.stock_service import MAX_QUANTITY, business_today
 
 
@@ -28,8 +28,7 @@ def result_for(session, document):
 
 
 def post_finished(session, user, payload, kind, *, production_order=None):
-    if session.get(Role, user.role_id).code not in ('admin', 'warehouse'):
-        raise HTTPException(403, '仅管理员和仓库人员可以操作成品库存')
+    require_permission(user, session, 'production.manage' if production_order is not None else 'finished.inventory.write')
     if production_order is None and payload.business_type != 'normal':
         # 普通接口不能伪造生产入库；生产入库只能由完工结算传入锁定后的生产单。
         raise HTTPException(422, '生产入库必须通过生产单完成操作')

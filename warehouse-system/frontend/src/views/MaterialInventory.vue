@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
+import { canOperate } from '../permissions'
 import DataPanel from '../components/ui/DataPanel.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
@@ -17,9 +18,15 @@ const resource = computed(() => route.meta.resource)
 const receipt = computed(() => resource.value === 'material-receipts')
 const outbound = computed(() => resource.value === 'material-outbounds')
 const writePage = computed(() => receipt.value || outbound.value)
-const canWrite = computed(() => ['admin', 'warehouse'].includes(auth.user?.role))
+const canWrite = computed(() => canOperate(auth.user?.role, 'material.inventory.write'))
 const form = reactive({ material_id: null, batch_no: '', batch_id: null, quantity: '', unit: 'kg', production_date: '', expiry_date: '', supplier_id: null, location_id: null, notes: '' })
 const options = reactive({ materials: [], suppliers: [], locations: [] })
+const units = ref([])
+const compatibleUnits = computed(() => {
+  const selected = options.materials.find(row => row.id === form.material_id)
+  const source = units.value.find(row => row.code === selected?.unit)
+  return source ? units.value.filter(row => row.dimension === source.dimension) : selected ? [{ code: selected.unit }] : []
+})
 const candidates = ref([]), candidatePage = ref(1), candidateTotal = ref(0)
 const saving = ref(false), error = ref(''), success = ref(null), rows = ref([]), total = ref(0), loading = ref(false)
 const query = ref(''), page = ref(1), pageSize = ref(20)
@@ -111,7 +118,8 @@ watch(resource, async () => {
   form.quantity = ''; form.batch_id = null; requestId = ''; lastPayload = ''; candidatePage.value = 1
   await load()
   if (writePage.value) {
-    await Promise.all(['materials', 'suppliers', 'locations'].map(name => searchOptions(name)))
+    await Promise.all([...['materials', 'suppliers', 'locations'].map(name => searchOptions(name)),
+      api.get('/units').then(result => { units.value = result.data }).catch(e => { error.value = e.message })])
     if (outbound.value) await loadBatches(true)
   }
 }, { immediate: true })
@@ -130,7 +138,7 @@ watch(resource, async () => {
   <DataPanel v-if="writePage && canWrite" :title="panelTitle" :description="receipt ? '填写批次、日期、供应商和库位后直接完成入库。' : '默认推荐最早到期的可用批次，也可选择其他合法批次。'" kind="action">
     <el-form label-width="105px" :disabled="saving" @submit.prevent="submit">
       <el-row :gutter="20"><el-col :span="12"><el-form-item label="原材料" required><el-select v-model="form.material_id" filterable remote :remote-method="q => searchOptions('materials', q)" placeholder="输入编码或名称搜索" @change="materialChanged"><el-option v-for="item in options.materials" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name} (${item.unit})`" /></el-select></el-form-item></el-col>
-        <el-col :span="12"><el-form-item label="数量 / 单位" required><div class="quantity-input"><el-input v-model="form.quantity" inputmode="decimal" maxlength="21" placeholder="如 10.500001" /><el-select v-model="form.unit"><el-option v-for="u in ['kg','g','L','mL','个']" :key="u" :value="u" :label="u" /></el-select></div></el-form-item></el-col></el-row>
+        <el-col :span="12"><el-form-item label="数量 / 单位" required><div class="quantity-input"><el-input v-model="form.quantity" inputmode="decimal" maxlength="21" placeholder="如 10.500001" /><el-select v-model="form.unit"><el-option v-for="u in compatibleUnits" :key="u.code" :value="u.code" :label="u.code" /></el-select></div></el-form-item></el-col></el-row>
       <template v-if="receipt"><el-row :gutter="20"><el-col :span="12"><el-form-item label="批号" required><el-input v-model="form.batch_no" maxlength="80" placeholder="请输入批号" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item label="供应商" required><el-select v-model="form.supplier_id" filterable remote :remote-method="q => searchOptions('suppliers',q)" placeholder="输入编码或名称搜索"><el-option v-for="item in options.suppliers" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name}`" /></el-select></el-form-item></el-col></el-row>
         <el-row :gutter="20"><el-col :span="12"><el-form-item label="生产日期" required><el-date-picker v-model="form.production_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></el-col><el-col :span="12"><el-form-item label="到期日期" required><el-date-picker v-model="form.expiry_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></el-col></el-row>
@@ -146,7 +154,7 @@ watch(resource, async () => {
     </el-form>
   </DataPanel>
 
-  <el-alert v-if="writePage && !canWrite" title="当前角色可查看记录，实际库存操作由仓库人员或管理员执行。" type="info" :closable="false" class="permission-notice" />
+  <el-alert v-if="writePage && !canWrite" title="当前账号仅有查看权限。" type="info" :closable="false" class="permission-notice" />
 
   <DataPanel :title="listTitle" description="支持按原料编码、名称或批号快速检索。">
     <FilterBar><el-form inline @submit.prevent="page=1; load()"><el-form-item label="搜索"><el-input v-model="query" maxlength="120" clearable placeholder="原料编码、名称；明细支持批号" @clear="page=1; load()" /></el-form-item><el-form-item><el-button :icon="Search" native-type="submit" type="primary">查询</el-button></el-form-item></el-form></FilterBar>

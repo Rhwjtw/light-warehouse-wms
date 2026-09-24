@@ -4,9 +4,9 @@ from decimal import Decimal, localcontext, ROUND_HALF_UP
 from fastapi import HTTPException
 from sqlalchemy import select, func
 
-from app.auth import audit
+from app.auth import audit, require_permission
 from app.finished_service import post_finished
-from app.models import MaterialIssueRecord, Role, utcnow
+from app.models import MaterialIssueRecord, utcnow
 from app.production_service import find_order, material_rows, material_data, order_data, decimal_text
 from app.schemas import FinishedStockInput
 from app.stock_service import business_today
@@ -23,10 +23,9 @@ def loss_values(theoretical, actual):
     return loss, rate
 
 
-def prepare(session, user, identity, actual_quantity):
-    role = session.get(Role, user.role_id)
-    if role is None or role.code not in ('admin', 'warehouse'):
-        raise HTTPException(403, '仅管理员和仓库人员可以完成生产结算')
+def prepare(session, user, identity, actual_quantity, *, completing=False):
+    if completing:
+        require_permission(user, session, 'production.manage')
     # 与领补退共用订单行锁；预览只持锁读取，不写数据库。
     order = find_order(session, identity, lock=True)
     if order.status in ('completed', 'received'):
@@ -72,7 +71,7 @@ def preview(session, user, identity, payload):
 
 
 def complete(session, user, identity, payload):
-    order, rows, calculation = prepare(session, user, identity, payload.actual_quantity)
+    order, rows, calculation = prepare(session, user, identity, payload.actual_quantity, completing=True)
     order.actual_quantity = payload.actual_quantity
     for row, result in zip(rows, calculation['materials']):
         for field in ('final_theoretical_quantity', 'actual_used_quantity', 'loss_quantity', 'loss_rate'):

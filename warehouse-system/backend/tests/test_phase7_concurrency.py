@@ -34,7 +34,7 @@ def committed_production():
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             token = client.post('/api/auth/login', json={'username': prefix, 'password': PASSWORD}).json()['data']['access_token']
-            headers = {role: {'Authorization': 'Bearer ' + token} for role in ('admin','warehouse','workshop')}
+            headers = {role: {'Authorization': 'Bearer ' + token} for role in ('admin','warehouse','workshop_director','workshop')}
             yield client, headers, None, prefix
     finally:
         cleanup = create_engine(settings.database_url.set(username=settings.mysql_migration_user,
