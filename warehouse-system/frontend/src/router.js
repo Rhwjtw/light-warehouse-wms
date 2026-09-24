@@ -1,18 +1,19 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Dashboard from './views/Dashboard.vue'
-import Expiry from './views/Expiry.vue'
-import Settings from './views/Settings.vue'
-import OperationLogs from './views/OperationLogs.vue'
 import { canAccess } from './permissions'
-import Catalog from './views/Catalog.vue'
-import Users from './views/Users.vue'
-import Login from './views/Login.vue'
-import MaterialInventory from './views/MaterialInventory.vue'
-import FinishedInventory from './views/FinishedInventory.vue'
-import Boms from './views/Boms.vue'
-import ProductionOrders from './views/ProductionOrders.vue'
-import Losses from './views/Losses.vue'
 import { auth, restoreAuth } from './auth'
+
+const Dashboard = () => import('./views/Dashboard.vue')
+const Expiry = () => import('./views/Expiry.vue')
+const Settings = () => import('./views/Settings.vue')
+const OperationLogs = () => import('./views/OperationLogs.vue')
+const Catalog = () => import('./views/Catalog.vue')
+const Users = () => import('./views/Users.vue')
+const Login = () => import('./views/Login.vue')
+const MaterialInventory = () => import('./views/MaterialInventory.vue')
+const FinishedInventory = () => import('./views/FinishedInventory.vue')
+const Boms = () => import('./views/Boms.vue')
+const ProductionOrders = () => import('./views/ProductionOrders.vue')
+const Losses = () => import('./views/Losses.vue')
 
 export const menuGroups = [
   { label: '原材料管理', items: [['materials', '原材料档案'], ['material-receipts', '原材料入库'], ['material-outbounds', '原材料出库'], ['material-stock', '原材料库存'], ['batches', '批次库存'], ['material-transactions', '库存流水']] },
