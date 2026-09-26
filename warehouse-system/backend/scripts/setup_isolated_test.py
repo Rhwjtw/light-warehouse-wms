@@ -114,11 +114,22 @@ def grants(run_root, data, port):
             legacy = len(tables) == 24 and not {'material_transfers', 'material_counts', 'material_adjustments'}.intersection(tables)
             current = len(tables) == 27 and {'material_transfers', 'material_counts', 'material_adjustments'}.issubset(tables)
             if 'alembic_version' not in tables or not (legacy or current):
-                raise RuntimeError('隔离测试库表结构必须是 0010 或 0011 版本')
+                raise RuntimeError('隔离测试库表结构必须是 0010、0011 或 0012 版本')
+            insert_only = {'stock_documents', 'inventory_transactions', 'operation_logs',
+                           'material_transfers', 'material_counts', 'material_adjustments',
+                           'material_issue_records', 'finished_receipts', 'finished_outbounds'}
+            column_updates = {
+                'material_movements': ('shelved_quantity',),
+                'material_batches': ('received_quantity', 'remaining_quantity', 'updated_at'),
+                'finished_batches': ('remaining_quantity', 'updated_at'),
+            }
             for table in tables:
                 if table != 'alembic_version':
                     cursor.execute(f"GRANT INSERT ON `{DATABASE}`.`{table}` TO '{APP_USER}'@'127.0.0.1'")
-                if table not in ('alembic_version', 'stock_documents', 'inventory_transactions', 'operation_logs', 'material_transfers', 'material_counts', 'material_adjustments'):
+                if table in column_updates:
+                    columns = ', '.join(f'`{column}`' for column in column_updates[table])
+                    cursor.execute(f"GRANT UPDATE ({columns}) ON `{DATABASE}`.`{table}` TO '{APP_USER}'@'127.0.0.1'")
+                elif table not in insert_only and table != 'alembic_version':
                     cursor.execute(f"GRANT UPDATE, DELETE ON `{DATABASE}`.`{table}` TO '{APP_USER}'@'127.0.0.1'")
     print('隔离应用账号授权完成')
 

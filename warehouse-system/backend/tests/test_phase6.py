@@ -258,18 +258,19 @@ def test_fefo_suggests_multiple_batches_in_expiry_order(context):
 
 def test_expired_batch_is_not_recommended_or_allowed(context):
     data = scenario(context, 'expired', stock_batches=((0, '5', 30),))
-    with Session(bind=context[2], join_transaction_mode='create_savepoint') as session:
-        batch = session.get(MaterialBatch, data['batches'][0])
-        batch.expiry_date = business_today() - timedelta(days=1)
-        session.commit()
-    suggestion = data['client'].get(
-        f"/api/production-orders/{data['order']['id']}/materials/{data['materials'][0]['id']}/fefo-suggestion",
-        headers=data['headers']['warehouse'], params={'quantity': '1'},
-    ).json()['data']
-    assert suggestion['suggestions'] == []
-    response = post_material(data, 'issue', data['order']['materials'][0]['id'],
-                             [{'batch_id': data['batches'][0], 'quantity': '1'}])
-    assert response.status_code == 422
+    from unittest.mock import patch
+    test_day = business_today() + timedelta(days=31)
+    # 模拟业务日期跨过到期日，不直接改写不可变批次的 expiry_date。
+    with patch('app.stock_service.business_today', return_value=test_day), \
+            patch('app.production_service.business_today', return_value=test_day):
+        suggestion = data['client'].get(
+            f"/api/production-orders/{data['order']['id']}/materials/{data['materials'][0]['id']}/fefo-suggestion",
+            headers=data['headers']['warehouse'], params={'quantity': '1'},
+        ).json()['data']
+        assert suggestion['suggestions'] == []
+        response = post_material(data, 'issue', data['order']['materials'][0]['id'],
+                                 [{'batch_id': data['batches'][0], 'quantity': '1'}])
+        assert response.status_code == 422
 
 
 def test_failure_during_ledger_creation_rolls_back_everything(context, monkeypatch):

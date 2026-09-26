@@ -17,6 +17,14 @@ from app.stock_service import MAX_QUANTITY, business_today
 SUPPORTED_KINDS = {'material_outbound', 'finished_outbound'}
 
 
+class AlreadyReversed(HTTPException):
+    """Expected conflict, distinct from unexpected database failures."""
+    code = 'ALREADY_REVERSED'
+
+    def __init__(self):
+        super().__init__(409, '原单已冲销，不能重复冲销')
+
+
 def _reversal_for(session, original_id):
     return session.scalar(select(StockDocument).where(StockDocument.reverses_document_id == original_id))
 
@@ -99,13 +107,13 @@ def _plan(session, identity, *, lock=False):
             raise HTTPException(409, '原单成品库存不存在，不能冲销')
         query = select(FinishedProduct).where(FinishedProduct.id == product_id)
         product = session.scalar(query.with_for_update() if lock else query)
-    if lock:
-        document = session.scalar(select(StockDocument).where(StockDocument.id == identity).with_for_update())
-    if _reversal_for(session, identity):
-        raise HTTPException(409, '原单已冲销，不能重复冲销')
+    # 原单和原流水是不可变事实；锁它们会要求正式账号拥有 UPDATE 权限。
+    # 按普通记账的顺序先锁档案，再锁实际余额行，避免反向锁顺序。
     if document.kind == 'material_outbound':
         query = select(MaterialBatch).where(MaterialBatch.id == batch_id)
         batch = session.scalar(query.with_for_update() if lock else query)
+        if _reversal_for(session, identity):
+            raise AlreadyReversed()
         movement = session.scalar(select(MaterialMovement).where(MaterialMovement.document_id == identity))
         supplier = session.get(Supplier, batch.supplier_id) if batch else None
         location = session.get(Location, batch.location_id) if batch and batch.location_id else None
@@ -122,6 +130,8 @@ def _plan(session, identity, *, lock=False):
     else:
         query = select(FinishedBatch).where(FinishedBatch.id == batch_id)
         batch = session.scalar(query.with_for_update() if lock else query)
+        if _reversal_for(session, identity):
+            raise AlreadyReversed()
         outbound = session.scalar(select(FinishedOutbound).where(FinishedOutbound.document_id == identity))
         if (document.business_type != 'normal' or outbound is None or outbound.batch_id != batch_id
                 or outbound.quantity != -original_row.change_quantity or original_row.material_batch_id is not None
@@ -185,11 +195,14 @@ def reverse_document(session, user, identity, payload):
         with session.begin_nested():
             session.add(reversal)
             session.flush()
-    except IntegrityError:
+    except IntegrityError as exc:
         existing = session.scalar(select(StockDocument).where(StockDocument.request_id == payload.request_id))
         if existing:
             return replay(existing)
-        raise HTTPException(409, '原单已被其他请求冲销') from None
+        if (_reversal_for(session, identity)
+                or 'uq_stock_documents_reverses_document_id' in str(exc.orig)):
+            raise AlreadyReversed() from None
+        raise HTTPException(409, '冲销单标识冲突，请刷新后重试') from None
     before = batch.remaining_quantity
     amount = -original_row.change_quantity
     batch.remaining_quantity = before + amount

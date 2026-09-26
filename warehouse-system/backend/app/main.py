@@ -76,7 +76,7 @@ async def validation_error(request, exc):
 
 @app.exception_handler(HTTPException)
 async def http_error(request, exc):
-    return error(exc.status_code, 'HTTP_ERROR', str(exc.detail))
+    return error(exc.status_code, getattr(exc, 'code', 'HTTP_ERROR'), str(exc.detail))
 
 
 @app.exception_handler(IntegrityError)

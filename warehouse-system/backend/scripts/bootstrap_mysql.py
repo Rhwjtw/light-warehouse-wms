@@ -47,10 +47,21 @@ def main():
                 cursor.execute(f'GRANT {grants} ON `{database}`.* TO %s@\'localhost\'', (user,))
             subprocess.run([sys.executable, '-m', 'alembic', 'upgrade', 'head'], cwd=ENV.parent, check=True)
             cursor.execute('SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = %s', (database,))
+            insert_only = {'stock_documents', 'inventory_transactions', 'operation_logs',
+                           'material_transfers', 'material_counts', 'material_adjustments',
+                           'material_issue_records', 'finished_receipts', 'finished_outbounds'}
+            column_updates = {
+                'material_movements': ('shelved_quantity',),
+                'material_batches': ('received_quantity', 'remaining_quantity', 'updated_at'),
+                'finished_batches': ('remaining_quantity', 'updated_at'),
+            }
             for (table,) in cursor.fetchall():
                 if table != 'alembic_version':
                     cursor.execute(f'GRANT INSERT ON `{database}`.`{table}` TO %s@\'localhost\'', (app_user,))
-                if table not in ('stock_documents', 'inventory_transactions', 'operation_logs', 'material_transfers', 'material_counts', 'material_adjustments', 'alembic_version'):
+                if table in column_updates:
+                    columns = ', '.join(f'`{column}`' for column in column_updates[table])
+                    cursor.execute(f'GRANT UPDATE ({columns}) ON `{database}`.`{table}` TO %s@\'localhost\'', (app_user,))
+                elif table not in insert_only and table != 'alembic_version':
                     cursor.execute(f'GRANT UPDATE, DELETE ON `{database}`.`{table}` TO %s@\'localhost\'', (app_user,))
             cursor.execute('SELECT VERSION()')
             print('MySQL', cursor.fetchone()[0], ': database and local application/migration accounts ready')

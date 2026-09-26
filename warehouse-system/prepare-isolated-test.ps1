@@ -1,6 +1,7 @@
 ﻿param(
     [int]$Port = 33312,
     [string]$RunName = ('e2e-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
+    [ValidateSet('head', '0011')][string]$TargetRevision = 'head',
     [string]$MySqlBase = 'C:\Program Files\MySQL\MySQL Server 8.4'
 )
 $ErrorActionPreference = 'Stop'
@@ -62,7 +63,7 @@ if ($LASTEXITCODE -ne 0) { throw '隔离库账号创建失败。' }
 if ($LASTEXITCODE -ne 0) { throw '隔离目标校验失败。' }
 Push-Location (Join-Path $source 'backend')
 try {
-    & $python -m alembic upgrade head
+    & $python -m alembic upgrade $TargetRevision
     if ($LASTEXITCODE -ne 0) { throw '隔离迁移失败。' }
 } finally { Pop-Location }
 & $python $helper grants $runRoot $Port

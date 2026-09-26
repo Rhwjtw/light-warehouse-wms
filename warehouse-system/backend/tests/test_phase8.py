@@ -28,15 +28,17 @@ def test_expiry_boundaries(context, days, state):
     with Session(bind=context[2], join_transaction_mode='create_savepoint') as s:
         for rule in s.scalars(select(WarningRule)):
             rule.days = 30 if rule.code == 'expiry_near' else 90
-        s.get(MaterialBatch, data['batches'][0]).expiry_date = business_today() + timedelta(days=days)
         s.commit()
     params = {'q': data['materials'][0]['name'], 'status': state}
-    result = get(context, 'alerts/expiry', **params)
-    assert result['total'] == 1
-    row = result['items'][0]
-    assert row['status'] == state and row['days_remaining'] == days
-    assert row['supplier_name'] and row['location_name'] and row['unit'] == 'kg'
-    assert get(context, 'alerts/expiry', **params, page=2)['items'] == []
+    from unittest.mock import patch
+    test_day = business_today() + timedelta(days=100-days)
+    with patch('app.overview.business_today', return_value=test_day):
+        result = get(context, 'alerts/expiry', **params)
+        assert result['total'] == 1
+        row = result['items'][0]
+        assert row['status'] == state and row['days_remaining'] == days
+        assert row['supplier_name'] and row['location_name'] and row['unit'] == 'kg'
+        assert get(context, 'alerts/expiry', **params, page=2)['items'] == []
 
 
 def test_zero_stock_filters_and_live_settings(context):
@@ -45,18 +47,19 @@ def test_zero_stock_filters_and_live_settings(context):
     q = data['materials'][0]['name']
     with Session(bind=connection, join_transaction_mode='create_savepoint') as s:
         batch = s.get(MaterialBatch, data['batches'][1]); batch.remaining_quantity = 0
-        batch.expiry_date = business_today() - timedelta(days=1)
         s.commit()
-    assert get(context, 'alerts/expiry', q=q)['total'] == 1
-    assert get(context, 'alerts/expiry', q=q, status='EXPIRED')['total'] == 0
-    result = client.put('/api/settings/expiry', headers=headers['admin'], json={'urgent_expiry_days':50,'warning_expiry_days':100})
-    assert result.status_code == 200
-    assert get(context, 'alerts/expiry', q=q)['items'][0]['status'] == 'URGENT'
-    assert get(context, 'dashboard/summary')['urgent_expiry_days'] == 50
-    assert get(context, 'alerts/expiry', q=q, date_from=str(business_today()+timedelta(days=46)))['total'] == 0
-    assert get(context, 'alerts/expiry', q='%')['total'] == 0
-    assert client.get('/api/alerts/expiry', headers=headers['admin'], params={'date_from':'2026-02-02','date_to':'2026-01-01'}).status_code == 422
-    client.put('/api/settings/expiry', headers=headers['admin'], json={'urgent_expiry_days':30,'warning_expiry_days':90})
+    from unittest.mock import patch
+    with patch('app.overview.business_today', return_value=business_today()+timedelta(days=21)):
+        assert get(context, 'alerts/expiry', q=q)['total'] == 1
+        assert get(context, 'alerts/expiry', q=q, status='EXPIRED')['total'] == 0
+        result = client.put('/api/settings/expiry', headers=headers['admin'], json={'urgent_expiry_days':50,'warning_expiry_days':100})
+        assert result.status_code == 200
+        assert get(context, 'alerts/expiry', q=q)['items'][0]['status'] == 'URGENT'
+        assert get(context, 'dashboard/summary')['urgent_expiry_days'] == 50
+        assert get(context, 'alerts/expiry', q=q, date_from=str(business_today()+timedelta(days=46)))['total'] == 0
+        assert get(context, 'alerts/expiry', q='%')['total'] == 0
+        assert client.get('/api/alerts/expiry', headers=headers['admin'], params={'date_from':'2026-02-02','date_to':'2026-01-01'}).status_code == 422
+        client.put('/api/settings/expiry', headers=headers['admin'], json={'urgent_expiry_days':30,'warning_expiry_days':90})
 
 
 @pytest.mark.parametrize('urgent,warning', [(0,90),(-1,90),(90,30),(30,30),(True,90),(1.5,90),(30,36501)])
