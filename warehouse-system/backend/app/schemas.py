@@ -57,6 +57,12 @@ class SupplierInput(ArchiveInput):
     phone: str | None = Field(default=None, max_length=40)
 
 
+class LocationInput(InputModel):
+    name: Name
+    is_active: bool = True
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 class UserCreate(InputModel):
     username: Username
     display_name: Annotated[str, StringConstraints(min_length=1, max_length=80)]
@@ -106,8 +112,42 @@ class MaterialReceiptInput(InputModel):
     production_date: date
     expiry_date: date
     supplier_id: int = Field(gt=0)
-    location_id: int = Field(gt=0)
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class MaterialPutawayInput(InputModel):
+    request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
+    receipt_movement_id: int = Field(gt=0)
+    location_id: int = Field(gt=0)
+    quantity: PositiveQuantity
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class MaterialTransferInput(InputModel):
+    request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
+    source_batch_id: int = Field(gt=0)
+    target_location_id: int = Field(gt=0)
+    quantity: PositiveQuantity
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class MaterialCountInput(InputModel):
+    request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
+    batch_id: int = Field(gt=0)
+    book_quantity: Quantity
+    actual_quantity: Quantity
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+SignedChange = Annotated[Decimal, BeforeValidator(exact_decimal), Field(max_digits=20, decimal_places=6)]
+
+
+class MaterialAdjustmentInput(InputModel):
+    request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
+    batch_id: int = Field(gt=0)
+    book_quantity: Quantity
+    change_quantity: SignedChange
+    reason: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
 
 
 class FinishedStockInput(InputModel):

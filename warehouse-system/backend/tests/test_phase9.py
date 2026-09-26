@@ -147,7 +147,7 @@ def test_other_posting_failures_leave_all_tables_unchanged(context, kind, failur
             payload = {'request_id': uuid4().hex, 'material_id': data['materials'][0]['id'], 'quantity': '1', 'unit': 'kg'}
             if kind == 'material_receipt':
                 payload.update(batch_no='extra', production_date=str(business_today()), expiry_date=str(business_today()),
-                               supplier_id=data['supplier']['id'], location_id=data['location']['id'])
+                               supplier_id=data['supplier']['id'])
             else:
                 payload['batch_id'] = data['batches'][0]
             response = client.post('/api/' + kind.replace('_', '-') + 's', headers=headers, json=payload)

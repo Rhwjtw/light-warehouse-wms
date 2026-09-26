@@ -95,7 +95,7 @@ def expiry(user: UserDep, session: SessionDep, q: str = Query('', max_length=120
                    Location.name.label('location_name'), Supplier.name.label('supplier_name'))\
         .join(RawMaterial, RawMaterial.id == Batch.material_id)\
         .join(Location, Location.id == Batch.location_id).join(Supplier, Supplier.id == Batch.supplier_id)\
-        .where(Batch.remaining_quantity > 0)
+        .where(Batch.remaining_quantity > 0, Batch.stock_status == 'shelved')
     # 零余额批次没有可处置库存，不进入过期或临期预警。
     query = query.where(state == status) if status else query.where(state != 'NORMAL')
     if q.strip():
@@ -115,7 +115,8 @@ def summary(user: UserDep, session: SessionDep):
     start, end = date_bounds(today, today)
     def count(model, *conditions):
         return session.scalar(select(func.count()).select_from(model).where(*conditions))
-    stock = select(Batch.material_id, func.sum(Batch.remaining_quantity).label('quantity')).group_by(Batch.material_id).subquery()
+    stock = select(Batch.material_id, func.sum(Batch.remaining_quantity).label('quantity')).where(
+        Batch.stock_status == 'shelved', Batch.location_id.is_not(None)).group_by(Batch.material_id).subquery()
     # 最低库存按同一种原料的全部批次余额汇总后比较；min_stock=0 表示未启用该项预警。
     low = session.scalar(select(func.count()).select_from(RawMaterial).outerjoin(stock, stock.c.material_id == RawMaterial.id)
                          .where(RawMaterial.deleted_at.is_(None), RawMaterial.min_stock > 0,
@@ -123,12 +124,12 @@ def summary(user: UserDep, session: SessionDep):
     result = dict(rule_data(rules), business_date=str(today), timezone=get_settings().business_timezone,
                   materials=count(RawMaterial, RawMaterial.deleted_at.is_(None)),
                   products=count(FinishedProduct, FinishedProduct.deleted_at.is_(None)),
-                  stocked_batches=count(Batch, Batch.remaining_quantity > 0),
+                  stocked_batches=count(Batch, Batch.remaining_quantity > 0, Batch.stock_status == 'shelved'),
                   in_progress_orders=count(ProductionOrder, ProductionOrder.status == 'in_progress'), low_stock_materials=low,
-                  expired_batches=count(Batch, Batch.remaining_quantity > 0, Batch.expiry_date < today),
-                  urgent_batches=count(Batch, Batch.remaining_quantity > 0, Batch.expiry_date >= today,
+                  expired_batches=count(Batch, Batch.remaining_quantity > 0, Batch.stock_status == 'shelved', Batch.expiry_date < today),
+                  urgent_batches=count(Batch, Batch.remaining_quantity > 0, Batch.stock_status == 'shelved', Batch.expiry_date >= today,
                                        Batch.expiry_date <= today + timedelta(days=rules['expiry_near'].days)),
-                  warning_batches=count(Batch, Batch.remaining_quantity > 0, Batch.expiry_date >= today,
+                  warning_batches=count(Batch, Batch.remaining_quantity > 0, Batch.stock_status == 'shelved', Batch.expiry_date >= today,
                                         Batch.expiry_date <= today + timedelta(days=rules['expiry_early'].days)))
     # kg、L、个等单位不能相加；今日统计按真实记账时间分单位聚合，而不是按单据补录日期混算。
     groups = session.execute(select(Ledger.kind, Ledger.unit, func.sum(Ledger.change_quantity))
@@ -137,6 +138,9 @@ def summary(user: UserDep, session: SessionDep):
     mapping = {'material_receipt': 'material_in', 'return': 'material_in', 'material_outbound': 'material_out',
                'issue': 'material_out', 'supplement': 'material_out', 'finished_receipt': 'finished_in', 'finished_outbound': 'finished_out'}
     for kind, unit, quantity in groups:
+        if kind not in mapping:
+            # Shelf/transfer/count rows are internal location movements, not new receipts or shipments.
+            continue
         bucket = buckets[mapping[kind]]
         bucket[unit] = bucket.get(unit, 0) + abs(quantity)
     result['today'] = {key: [{'unit': unit, 'quantity': str(value)} for unit, value in sorted(bucket.items())] for key, bucket in buckets.items()}

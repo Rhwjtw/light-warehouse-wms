@@ -50,7 +50,7 @@ def main():
             for (table,) in cursor.fetchall():
                 if table != 'alembic_version':
                     cursor.execute(f'GRANT INSERT ON `{database}`.`{table}` TO %s@\'localhost\'', (app_user,))
-                if table not in ('inventory_transactions', 'operation_logs', 'alembic_version'):
+                if table not in ('inventory_transactions', 'operation_logs', 'material_transfers', 'material_counts', 'material_adjustments', 'alembic_version'):
                     cursor.execute(f'GRANT UPDATE, DELETE ON `{database}`.`{table}` TO %s@\'localhost\'', (app_user,))
             cursor.execute('SELECT VERSION()')
             print('MySQL', cursor.fetchone()[0], ': database and local application/migration accounts ready')

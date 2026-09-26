@@ -18,6 +18,7 @@ const resource = computed(() => route.meta.resource)
 const isUser = computed(() => resource.value === 'users')
 const permission = computed(() => ({ materials: 'material.archive.write', products: 'finished.archive.write', suppliers: 'supplier.write', locations: 'location.write', users: 'user.manage' })[resource.value])
 const canWrite = computed(() => canOperate(auth.user?.role, permission.value))
+const dateTime = value => value ? new Date(value).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false }) : '—'
 const units = ref([]), unitChoice = ref('')
 const code = { key: 'code', label: '编码', required: true, max: 40, pattern: /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/, hint: '字母、数字、点、横线或下划线' }
 const name = { key: 'name', label: '名称', required: true, max: 120 }
@@ -27,7 +28,7 @@ const configs = {
   materials: [code, name, unit('kg'), { key: 'specification', label: '规格', max: 200 }, quantity],
   products: [code, name, unit('盒'), { key: 'specification', label: '规格', max: 200 }, quantity],
   suppliers: [code, name, { key: 'contact', label: '联系人', max: 80 }, { key: 'phone', label: '联系电话', max: 40 }],
-  locations: [code, name],
+  locations: [{ ...name, label: '库位名称' }],
 }
 const roles = ref([])
 const fields = computed(() => isUser.value ? [
@@ -88,7 +89,7 @@ async function save() {
 }
 async function remove(row) {
   try {
-    await ElMessageBox.confirm(`确认软删除“${row.name || row.username}”？编码/用户名会保留，已有业务引用时请使用停用。`, '删除确认', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
+    await ElMessageBox.confirm(`确认软删除“${row.name || row.username}”？已有业务引用时请使用停用。`, '删除确认', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
     await api.delete(`/${resource.value}/${row.id}`); ElMessage.success('已软删除'); await load()
   } catch (e) { if (e instanceof Error) ElMessage.error(e.message) }
 }
@@ -107,15 +108,18 @@ watch(resource, async () => {
     <template v-if="canWrite" #actions><el-button type="primary" :icon="Plus" @click="open('create')">新增{{ isUser ? '用户' : route.meta.title.replace('档案', '') }}</el-button></template>
   </PageHeader>
   <div v-if="loadError" class="feedback-stack"><el-alert :title="loadError" type="error" :closable="false" show-icon /></div>
-  <DataPanel :title="isUser ? '用户列表' : '资料列表'" :description="isUser ? '按用户名、姓名或状态查找账户。' : '按编码、名称或状态快速定位资料。'">
+  <DataPanel :title="isUser ? '用户列表' : '资料列表'" :description="isUser ? '按用户名、姓名或状态查找账户。' : resource === 'locations' ? '按库位名称或状态查找。' : '按编码、名称或状态快速定位资料。'">
     <FilterBar><el-form inline class="search-bar" @submit.prevent="search">
-      <el-form-item label="搜索"><el-input v-model="query" :placeholder="isUser ? '用户名 / 姓名' : '编码 / 名称'" clearable maxlength="120" @clear="search" /></el-form-item>
+      <el-form-item label="搜索"><el-input v-model="query" :placeholder="isUser ? '用户名 / 姓名' : resource === 'locations' ? '库位名称' : '编码 / 名称'" clearable maxlength="120" @clear="search" /></el-form-item>
       <el-form-item label="状态"><el-select v-model="status" class="catalog-status-select" @change="search"><el-option label="全部" value="all" /><el-option label="启用" value="active" /><el-option label="停用" value="inactive" /></el-select></el-form-item>
       <el-form-item><el-button type="primary" :icon="Search" native-type="submit" :loading="loading">查询</el-button><el-button @click="query = ''; status = 'all'; search()">重置</el-button></el-form-item>
     </el-form></FilterBar>
     <TableSkeleton v-if="loading && !rows.length" />
     <el-table v-else v-loading="loading" :data="rows" stripe row-key="id">
       <el-table-column v-for="field in fields" :key="field.key" :prop="field.key === 'role_id' ? 'role_name' : field.key" :label="field.label" :min-width="field.key === 'unit' ? 75 : 145" show-overflow-tooltip />
+      <el-table-column v-if="resource === 'locations'" prop="notes" label="备注" min-width="180" show-overflow-tooltip />
+      <el-table-column v-if="resource === 'locations'" label="创建时间" min-width="175"><template #default="{ row }">{{ dateTime(row.created_at) }}</template></el-table-column>
+      <el-table-column v-if="resource === 'locations'" label="更新时间" min-width="175"><template #default="{ row }">{{ dateTime(row.updated_at) }}</template></el-table-column>
       <el-table-column label="状态" width="90"><template #default="{ row }"><StatusBadge :tone="row.is_active ? 'success' : 'info'" :label="row.is_active ? '启用' : '停用'" /></template></el-table-column>
       <el-table-column label="操作" :width="canWrite ? isUser ? 280 : 190 : 85" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="open('view', row)">查看</el-button><el-button v-if="canWrite" link type="primary" @click="open('edit', row)">编辑</el-button><el-button v-if="canWrite && isUser && row.id !== auth.user.id" link type="warning" @click="open('password', row)">重置密码</el-button><el-button v-if="canWrite && (!isUser || row.id !== auth.user.id)" link type="danger" @click="remove(row)">删除</el-button></template></el-table-column>
       <template #empty><EmptyState :title="loadError ? '资料加载失败' : '暂无符合条件的资料'" :description="loadError ? '请检查连接后重新查询。' : '可调整搜索词或状态筛选。'" /></template>
@@ -126,6 +130,7 @@ watch(resource, async () => {
     <p class="catalog-dialog-intro">{{ mode === 'password' ? '为该用户设置新密码。保存后原登录状态将按现有认证规则处理。' : mode === 'view' ? '资料详情' : '带 * 的字段为必填项，保存后列表会自动刷新。' }}</p>
     <el-form ref="formRef" :model="form" :rules="rules" label-width="125px" :disabled="mode === 'view' || saving" @submit.prevent="save">
       <template v-if="mode !== 'password'">
+        <el-descriptions v-if="resource === 'locations' && form.id" :column="1" border class="location-meta"><el-descriptions-item label="创建时间">{{ dateTime(form.created_at) }}</el-descriptions-item><el-descriptions-item label="更新时间">{{ dateTime(form.updated_at) }}</el-descriptions-item></el-descriptions>
         <el-form-item v-for="field in fields" :key="field.key" :label="field.label" :prop="field.key">
           <template v-if="field.key === 'unit'"><el-select v-model="unitChoice" placeholder="选择单位" @change="selectUnit"><el-option v-for="value in unitOptions" :key="value" :label="value" :value="value" /><el-option label="自定义" value="__custom__" /></el-select><el-input v-if="unitChoice === '__custom__'" v-model="form.unit" maxlength="16" show-word-limit placeholder="输入自定义单位，如 卷、桶、米" class="custom-unit-input" @input="formRef?.clearValidate('unit')" /></template>
           <el-select v-else-if="field.options" v-model="form[field.key]" :disabled="isUser && field.key === 'role_id' && form.id === auth.user.id"><el-option v-for="option in field.options" :key="option.value" :label="option.label" :value="option.value" /></el-select>
@@ -146,4 +151,5 @@ watch(resource, async () => {
 .catalog-status-select { width: 120px; }
 .catalog-dialog-intro { margin: 0 0 20px; color: var(--wms-text-secondary); font-size: 13px; }
 .custom-unit-input { margin-top: 8px; }
+.location-meta { margin-bottom: 18px; }
 </style>

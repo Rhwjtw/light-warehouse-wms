@@ -40,15 +40,19 @@ def test_custom_units_flow_and_existing_units(context):
         }).status_code == 422
 
     supplier = post(client, headers, 'warehouse', 'suppliers', {'code': prefix+'s', 'name': '测试供应商'}).json()['data']
-    location = post(client, headers, 'warehouse', 'locations', {'code': prefix+'l', 'name': '测试库位'}).json()['data']
+    location = post(client, headers, 'warehouse', 'locations', {'name': '测试库位'}).json()['data']
     receipt = post(client, headers, 'warehouse', 'material-receipts', {
         'request_id': uuid4().hex, 'material_id': material['id'], 'batch_no': prefix+'batch',
         'quantity': '30', 'unit': '卷', 'production_date': str(business_today()-timedelta(days=1)),
         'expiry_date': str(business_today()+timedelta(days=90)),
-        'supplier_id': supplier['id'], 'location_id': location['id'],
+        'supplier_id': supplier['id'],
     })
     assert receipt.status_code == 200, receipt.text
-    batch_id = receipt.json()['data']['batch_id']
+    movement_id = client.get(f"/api/material-receipts/{receipt.json()['data']['id']}", headers=headers['warehouse']).json()['data']['receipt_movement_id']
+    batch_id = post(client, headers, 'warehouse', 'material-putaways', {
+        'request_id': uuid4().hex, 'receipt_movement_id': movement_id,
+        'location_id': location['id'], 'quantity': '30',
+    }).json()['data']['target_batch_id']
     assert receipt.json()['data']['unit'] == '卷'
     assert client.get('/api/material-stock', headers=headers['accountant'], params={'q': material['code']}).json()['data']['items'][0]['unit'] == '卷'
     assert client.get('/api/material-batches', headers=headers['accountant'], params={'material_id': material['id']}).json()['data']['items'][0]['unit'] == '卷'
@@ -119,17 +123,22 @@ def test_five_roles_direct_api_boundaries(context):
                       json={key: material[key] for key in ('code','name','unit','is_active')}).status_code == 200
     product = post(client, headers, 'accountant', 'products', {'code': prefix+'p', 'name': '权限成品', 'unit': '盒'}).json()['data']
     supplier = post(client, headers, 'accountant', 'suppliers', {'code': prefix+'s', 'name': '权限供应商'}).json()['data']
-    location = post(client, headers, 'warehouse', 'locations', {'code': prefix+'loc', 'name': '权限库位'}).json()['data']
+    location = post(client, headers, 'warehouse', 'locations', {'name': '权限库位'}).json()['data']
     receipt_payload = {
         'request_id': uuid4().hex, 'material_id': material['id'], 'batch_no': prefix+'batch',
         'quantity': '30', 'unit': 'kg', 'production_date': str(business_today()-timedelta(days=1)),
         'expiry_date': str(business_today()+timedelta(days=90)),
-        'supplier_id': supplier['id'], 'location_id': location['id'],
+        'supplier_id': supplier['id'],
     }
     for role in ('accountant', 'workshop_director', 'workshop'):
         assert post(client, headers, role, 'material-receipts', receipt_payload).status_code == 403
     receipt = post(client, headers, 'warehouse', 'material-receipts', receipt_payload)
     assert receipt.status_code == 200
+    movement_id = client.get(f"/api/material-receipts/{receipt.json()['data']['id']}", headers=headers['warehouse']).json()['data']['receipt_movement_id']
+    batch_id = post(client, headers, 'warehouse', 'material-putaways', {
+        'request_id': uuid4().hex, 'receipt_movement_id': movement_id,
+        'location_id': location['id'], 'quantity': '30',
+    }).json()['data']['target_batch_id']
     finished_payload = {'request_id': uuid4().hex, 'product_id': product['id'], 'quantity': '1',
                         'unit': '盒', 'business_date': str(business_today())}
     for role in ('accountant', 'workshop_director', 'workshop'):
@@ -148,7 +157,7 @@ def test_five_roles_direct_api_boundaries(context):
     order = order.json()['data']
     path = f"production-orders/{order['id']}"
     posting = {'request_id': uuid4().hex, 'order_material_id': order['materials'][0]['id'],
-               'unit': 'kg', 'allocations': [{'batch_id': receipt.json()['data']['batch_id'], 'quantity': '10'}]}
+               'unit': 'kg', 'allocations': [{'batch_id': batch_id, 'quantity': '10'}]}
     for role in ('warehouse', 'accountant'):
         assert post(client, headers, role, path+'/issue', posting).status_code == 403
     assert post(client, headers, 'workshop', path+'/issue', posting).status_code == 200
@@ -162,7 +171,7 @@ def test_five_roles_direct_api_boundaries(context):
     for role in ('warehouse', 'accountant', 'workshop'):
         assert post(client, headers, role, path+'/complete', {'actual_quantity':'10'}).status_code == 403
     assert post(client, headers, 'workshop_director', path+'/complete', {'actual_quantity':'10'}).status_code == 200
-    assert post(client, headers, 'accountant', 'locations', {'code': prefix+'l', 'name':'越权'}).status_code == 403
+    assert post(client, headers, 'accountant', 'locations', {'name':'越权'}).status_code == 403
     assert client.put('/api/settings/expiry', headers=headers['accountant'],
                       json={'urgent_expiry_days':30, 'warning_expiry_days':90}).status_code == 403
     assert client.put(f"/api/users/{users['accountant']['id']}", headers=headers['accountant'],

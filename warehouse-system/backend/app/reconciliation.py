@@ -10,8 +10,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models import (FinishedBatch, FinishedOutbound, FinishedReceipt,
-                        InventoryTransaction, MaterialBatch, MaterialIssueRecord,
-                        MaterialMovement, OperationLog, ProductionOrder,
+                        InventoryTransaction, MaterialAdjustment, MaterialBatch, MaterialCount, MaterialIssueRecord,
+                        MaterialMovement, MaterialTransfer, OperationLog, ProductionOrder,
                         ProductionOrderMaterial, StockDocument)
 from app.settlement_service import loss_values
 from app.unit_conversion import convert_quantity
@@ -48,12 +48,14 @@ def reconcile(session):
                 if row.before_quantity != balance or row.after_quantity != balance + row.change_quantity or row.unit != batch.unit:
                     problem(scope, batch.id, 'ledger chain/unit mismatch')
                 balance += row.change_quantity
-                if row.kind == 'material_receipt':
+                if row.kind == 'material_receipt' or row.kind in ('putaway', 'transfer', 'count_gain', 'adjustment') and row.change_quantity > 0:
                     received += row.change_quantity
             if batch.remaining_quantity < 0 or balance != batch.remaining_quantity:
                 problem(scope, batch.id, 'stock differs from ledger sum or is negative')
             if scope == 'material' and received != batch.received_quantity:
-                problem(scope, batch.id, 'received quantity differs from receipt ledger')
+                problem(scope, batch.id, 'cumulative inbound quantity differs from ledger')
+            if scope == 'material' and ((batch.stock_status == 'pending') != (batch.location_id is None)):
+                problem(scope, batch.id, 'pending status/location mismatch')
     for scope, batch_id in chains:
         problem(scope, batch_id, 'ledger references missing batch')
 
@@ -74,6 +76,43 @@ def reconcile(session):
                 problem('document', doc.id, 'wrong detail type')
             sign = 1 if kind in ('material_receipt', 'return', 'finished_receipt') else -1
             expected[row.document_id, scope, row.batch_id, kind, sign * row.quantity] += 1
+    putaway_totals = defaultdict(lambda: Decimal('0'))
+    for row in session.scalars(select(MaterialTransfer)):
+        doc = documents.get(row.document_id)
+        if doc is None or doc.kind not in ('putaway', 'transfer'):
+            problem('transfer', row.id, 'missing or wrong document')
+            continue
+        expected[row.document_id, 'material', row.source_batch_id, doc.kind, -row.quantity] += 1
+        expected[row.document_id, 'material', row.target_batch_id, doc.kind, row.quantity] += 1
+        if row.receipt_movement_id is not None:
+            if doc.kind != 'putaway':
+                problem('transfer', row.id, 'receipt linkage on non-putaway')
+            putaway_totals[row.receipt_movement_id] += row.quantity
+    for row in session.scalars(select(MaterialMovement)):
+        doc = documents.get(row.document_id)
+        if doc and doc.kind == 'material_receipt':
+            if row.shelved_quantity is None:
+                problem('receipt', row.id, 'missing shelved quantity')
+            else:
+                batch = session.get(MaterialBatch, row.batch_id)
+                if batch.stock_status == 'pending':
+                    if row.shelved_quantity != putaway_totals[row.id] or batch.remaining_quantity != row.quantity - row.shelved_quantity:
+                        problem('receipt', row.id, 'pending/shelved quantities differ from putaway history')
+                elif row.shelved_quantity != row.quantity:
+                    problem('receipt', row.id, 'legacy shelved receipt has pending quantity')
+    for row in session.scalars(select(MaterialCount)):
+        doc = documents.get(row.document_id)
+        kind = 'count_gain' if row.difference > 0 else 'count_loss' if row.difference < 0 else 'count_match'
+        if doc is None or doc.kind != kind:
+            problem('count', row.id, 'missing or wrong document')
+        elif row.difference:
+            expected[row.document_id, 'material', row.batch_id, kind, row.difference] += 1
+    for row in session.scalars(select(MaterialAdjustment)):
+        doc = documents.get(row.document_id)
+        if doc is None or doc.kind != 'adjustment' or row.after_quantity != row.before_quantity + row.change_quantity:
+            problem('adjustment', row.id, 'missing or inconsistent adjustment document')
+        else:
+            expected[row.document_id, 'material', row.batch_id, 'adjustment', row.change_quantity] += 1
     for key in expected.keys() | actual.keys():
         if expected[key] != actual[key]:
             problem('document', key[0], 'details and ledger differ')
@@ -81,7 +120,7 @@ def reconcile(session):
         OperationLog.entity_type == 'stock_documents')) if row.entity_id and row.entity_id.isdigit()}
     posted = {key[0] for key in actual}
     for identity in documents:
-        if identity not in posted or identity not in logged:
+        if (identity not in posted and documents[identity].kind != 'count_match') or identity not in logged:
             problem('document', identity, 'missing ledger or audit')
 
     totals = defaultdict(lambda: Decimal('0'))

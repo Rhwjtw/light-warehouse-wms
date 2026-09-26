@@ -14,7 +14,7 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.main import app
 from app.models import (User, Role, RawMaterial, Supplier, Location, MaterialBatch, StockDocument,
-                        MaterialMovement, InventoryTransaction, OperationLog, utcnow)
+                        MaterialMovement, MaterialTransfer, InventoryTransaction, OperationLog, utcnow)
 from app.stock_service import business_today
 
 
@@ -38,7 +38,7 @@ def committed_inventory():
                       'iss':'warehouse-api','aud':'warehouse'},settings.auth_secret.get_secret_value(),algorithm='HS256')
     headers={'Authorization':'Bearer '+token}
     p=dict(request_id=uuid4().hex,material_id=ids['material'],batch_no=prefix,quantity='10',unit='kg',
-           supplier_id=ids['supplier'],location_id=ids['location'],production_date=str(business_today()),
+           supplier_id=ids['supplier'],production_date=str(business_today()),
            expiry_date=str(business_today()+timedelta(days=10)))
     try:
         yield headers,p,ids
@@ -50,6 +50,7 @@ def committed_inventory():
             assert session.get(User,ids['user']).username==prefix
             docs=select(StockDocument.id).where(StockDocument.operator_id==ids['user'])
             session.execute(delete(InventoryTransaction).where(InventoryTransaction.operator_id==ids['user']))
+            session.execute(delete(MaterialTransfer).where(MaterialTransfer.document_id.in_(docs)))
             session.execute(delete(MaterialMovement).where(MaterialMovement.document_id.in_(docs)))
             session.execute(delete(OperationLog).where(OperationLog.user_id==ids['user']))
             session.execute(delete(StockDocument).where(StockDocument.operator_id==ids['user']))
@@ -74,14 +75,20 @@ def test_concurrent_receipt_and_outbound(committed_inventory):
     results=race('/api/material-receipts',[p,p],h)
     assert [r.status_code for r in results]==[200,200]
     assert results[0].json()['data']==results[1].json()['data']
-    batch_id=results[0].json()['data']['batch_id']
+    receipt_id=results[0].json()['data']['id']
+    with TestClient(app,raise_server_exceptions=False) as client:
+        movement_id=client.get(f'/api/material-receipts/{receipt_id}',headers=h).json()['data']['receipt_movement_id']
+    putaway=dict(request_id=uuid4().hex,receipt_movement_id=movement_id,location_id=ids['location'],quantity='10')
+    results=race('/api/material-putaways',[putaway,putaway],h)
+    assert [r.status_code for r in results]==[200,200]
+    batch_id=results[0].json()['data']['target_batch_id']
     out=dict(material_id=ids['material'],batch_id=batch_id,quantity='7',unit='kg')
     results=race('/api/material-outbounds',[dict(out,request_id=uuid4().hex),dict(out,request_id=uuid4().hex)],h)
     assert sorted(r.status_code for r in results)==[200,409]
     with SessionLocal() as session:
         assert session.get(MaterialBatch,batch_id).remaining_quantity==3
-        assert session.scalar(select(func.count()).select_from(StockDocument).where(StockDocument.operator_id==ids['user']))==2
-        assert session.scalar(select(func.count()).select_from(InventoryTransaction).where(InventoryTransaction.operator_id==ids['user']))==2
+        assert session.scalar(select(func.count()).select_from(StockDocument).where(StockDocument.operator_id==ids['user']))==3
+        assert session.scalar(select(func.count()).select_from(InventoryTransaction).where(InventoryTransaction.operator_id==ids['user']))==4
     # 重复并发出库只能扣一次，清零后再次重试仍返回历史成功结果。
     out.update(quantity='3',request_id=uuid4().hex)
     results=race('/api/material-outbounds',[out,out],h)
@@ -91,6 +98,14 @@ def test_concurrent_receipt_and_outbound(committed_inventory):
         assert session.get(MaterialBatch,batch_id).remaining_quantity==0
     results=race('/api/material-receipts',[dict(p,request_id=uuid4().hex),dict(p,request_id=uuid4().hex)],h)
     assert [r.status_code for r in results]==[200,200]
+    with TestClient(app,raise_server_exceptions=False) as client:
+        for receipt in results:
+            receipt_id=receipt.json()['data']['id']
+            movement_id=client.get(f'/api/material-receipts/{receipt_id}',headers=h).json()['data']['receipt_movement_id']
+            result=client.post('/api/material-putaways',headers=h,json={
+                'request_id':uuid4().hex,'receipt_movement_id':movement_id,
+                'location_id':ids['location'],'quantity':'10'})
+            assert result.status_code==200,result.text
     with SessionLocal() as session:
         assert session.get(MaterialBatch,batch_id).remaining_quantity==20
         assert session.get(MaterialBatch,batch_id).received_quantity==30

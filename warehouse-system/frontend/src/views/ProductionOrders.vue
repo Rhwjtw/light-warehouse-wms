@@ -163,7 +163,7 @@ function returnCandidates(material) {
   // 前端按逐笔记录计算每批最多可退量；服务端仍会基于数据库事实再次校验上限。
   const map = new Map()
   for (const record of current.value.material_records.filter(row => row.order_material_id === material.id)) {
-    const existing = map.get(record.batch_id) || { batch_id: record.batch_id, batch_no: record.batch_no, remaining_quantity: '—', expiry_date: '原领料批次', max_return: '0' }
+    const existing = map.get(record.batch_id) || { batch_id: record.batch_id, batch_no: record.batch_no, location_name: record.location_name, remaining_quantity: '—', expiry_date: '原领料批次', max_return: '0' }
     existing.max_return = quantityText(quantityUnits(existing.max_return) + (record.kind === 'return' ? -1n : 1n) * quantityUnits(record.quantity))
     map.set(record.batch_id, existing)
   }
@@ -185,7 +185,7 @@ async function loadCandidates() {
     // FEFO 返回可拆分的建议批次，用户可以调整，但过期、余额和档案状态以提交时服务端复核为准。
     if (!action.desired && action.kind === 'issue' && Number(result.remaining_to_issue) > 0) action.desired = result.remaining_to_issue
     const suggestions = new Map(result.suggestions.map(row => [row.batch_id, row.quantity]))
-    action.allocations = result.batches.map(row => ({ ...row, quantity: suggestions.get(row.id) || '' }))
+    action.allocations = result.batches.map(row => ({ ...row, suggested_quantity: suggestions.get(row.id) || '0', quantity: suggestions.get(row.id) || '' }))
   } catch (e) { error.value = e.message; action.allocations = [] }
   finally { candidateLoading.value = false }
 }
@@ -307,6 +307,7 @@ onMounted(() => { load(); loadProducts() })
           <el-table-column prop="document_no" label="单据号" min-width="190" />
           <el-table-column label="类型" width="110"><template #default="{row}">{{ kindNames[row.kind] }}</template></el-table-column>
           <el-table-column prop="batch_no" label="批次" min-width="130" />
+          <el-table-column prop="location_name" label="库位名称" min-width="130" />
           <el-table-column label="数量" min-width="105"><template #default="{row}">{{ amount(row.quantity, row.unit) }}</template></el-table-column>
           <el-table-column label="库存变化" min-width="190"><template #default="{row}">{{ row.before_quantity }} → {{ row.after_quantity }} {{ row.unit }}</template></el-table-column>
           <el-table-column prop="operator_name" label="操作人" width="105" />
@@ -346,7 +347,9 @@ onMounted(() => { load(); loadProducts() })
     <TableSkeleton v-if="candidateLoading && !action.allocations.length" :rows="3" />
     <el-table v-else :data="action.allocations" v-loading="candidateLoading" border>
       <el-table-column prop="batch_no" label="批次" min-width="150" />
+      <el-table-column prop="location_name" label="库位名称" min-width="135" />
       <el-table-column v-if="action.kind !== 'return'" prop="expiry_date" label="到期日期" width="130" />
+      <el-table-column v-if="action.kind !== 'return'" label="建议领用数量" min-width="130"><template #default="{row}">{{ amount(row.suggested_quantity, action.unit) }}</template></el-table-column>
       <el-table-column v-if="action.kind !== 'return'" label="库存余额" min-width="130"><template #default="{row}"><span class="data-value">{{ amount(row.remaining_quantity, row.unit) }}</span></template></el-table-column>
       <el-table-column v-else label="最多可退" min-width="130"><template #default="{row}"><span class="data-value">{{ amount(row.max_return, action.unit) }}</span></template></el-table-column>
       <el-table-column :label="`${actionNames[action.kind]}数量 (${action.unit})`" min-width="180"><template #default="{row}"><el-input v-model="row.quantity" inputmode="decimal" placeholder="不使用则留空" /></template></el-table-column>

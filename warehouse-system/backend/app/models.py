@@ -95,7 +95,7 @@ class FinishedProduct(Identity, Timestamps, Archive, Base):
 
 
 class MaterialBatch(Identity, Timestamps, Base):
-    # 原材料库存的实际承载实体。同一原料、批号、供应商和库位共同确定一个可累加入库的批次。
+    # 库位批次承载可用库存；location_id 为空的行是尚未上架的入库暂存批次。
     __tablename__ = 'material_batches'
     material_id: Mapped[int] = mapped_column(ForeignKey('raw_materials.id'))
     batch_no: Mapped[str] = mapped_column(String(80))
@@ -105,7 +105,8 @@ class MaterialBatch(Identity, Timestamps, Base):
     production_date: Mapped[date] = mapped_column(Date)
     expiry_date: Mapped[date] = mapped_column(Date)
     supplier_id: Mapped[int] = mapped_column(ForeignKey('suppliers.id'), index=True)
-    location_id: Mapped[int] = mapped_column(ForeignKey('locations.id'), index=True)
+    location_id: Mapped[int | None] = mapped_column(ForeignKey('locations.id'), index=True)
+    stock_status: Mapped[str] = mapped_column(String(16), default='shelved')
     received_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
     notes: Mapped[str | None] = mapped_column(Text)
     __table_args__ = (
@@ -113,6 +114,7 @@ class MaterialBatch(Identity, Timestamps, Base):
         Index('ix_material_batches_fefo', 'material_id', 'expiry_date', 'received_at'),
         Index('ix_material_batches_expiry', 'expiry_date'),
         CheckConstraint('received_quantity > 0 AND remaining_quantity >= 0 AND remaining_quantity <= received_quantity', name='valid_quantities'),
+        CheckConstraint("(stock_status = 'pending' AND location_id IS NULL) OR (stock_status = 'shelved' AND location_id IS NOT NULL)", name='valid_stock_status'),
         CheckConstraint('expiry_date >= production_date', name='valid_dates'),
     )
 
@@ -210,7 +212,7 @@ class StockDocument(Identity, Base):
     operator_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
-    __table_args__ = (CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound')", name='valid_kind'),
+    __table_args__ = (CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound','putaway','transfer','count_gain','count_loss','count_match','adjustment')", name='valid_kind'),
                      CheckConstraint("business_type IS NULL OR business_type IN ('normal','production')", name='valid_business_type'))
 
 
@@ -222,7 +224,44 @@ class MaterialMovement(Identity, Base):
     quantity: Mapped[Decimal] = mapped_column(QTY)
     input_quantity: Mapped[Decimal] = mapped_column(QTY)
     input_unit: Mapped[str] = mapped_column(ForeignKey('units.code'))
-    __table_args__ = (CheckConstraint('quantity > 0 AND input_quantity > 0', name='positive_quantities'),)
+    shelved_quantity: Mapped[Decimal | None] = mapped_column(QTY)
+    __table_args__ = (CheckConstraint('quantity > 0 AND input_quantity > 0', name='positive_quantities'),
+                     CheckConstraint('shelved_quantity IS NULL OR (shelved_quantity >= 0 AND shelved_quantity <= quantity)', name='valid_shelved_quantity'))
+
+
+class MaterialTransfer(Identity, Base):
+    __tablename__ = 'material_transfers'
+    document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), unique=True)
+    source_batch_id: Mapped[int] = mapped_column(ForeignKey('material_batches.id'))
+    target_batch_id: Mapped[int] = mapped_column(ForeignKey('material_batches.id'))
+    receipt_movement_id: Mapped[int | None] = mapped_column(ForeignKey('material_movements.id'))
+    quantity: Mapped[Decimal] = mapped_column(QTY)
+    __table_args__ = (CheckConstraint('quantity > 0', name='positive_quantity'),)
+
+
+class MaterialCount(Identity, Base):
+    __tablename__ = 'material_counts'
+    document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), unique=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey('material_batches.id'))
+    book_quantity: Mapped[Decimal] = mapped_column(QTY)
+    actual_quantity: Mapped[Decimal] = mapped_column(QTY)
+    difference: Mapped[Decimal] = mapped_column(QTY)
+    counted_by: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    counted_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    reason: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (CheckConstraint('book_quantity >= 0 AND actual_quantity >= 0 AND difference = actual_quantity - book_quantity', name='valid_count'),)
+
+
+class MaterialAdjustment(Identity, Base):
+    __tablename__ = 'material_adjustments'
+    document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), unique=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey('material_batches.id'))
+    before_quantity: Mapped[Decimal] = mapped_column(QTY)
+    change_quantity: Mapped[Decimal] = mapped_column(QTY)
+    after_quantity: Mapped[Decimal] = mapped_column(QTY)
+    operator_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    reason: Mapped[str] = mapped_column(Text)
+    __table_args__ = (CheckConstraint('before_quantity >= 0 AND after_quantity >= 0 AND change_quantity <> 0 AND after_quantity = before_quantity + change_quantity', name='valid_adjustment'),)
 
 
 class MaterialIssueRecord(Identity, Base):
@@ -300,6 +339,8 @@ class InventoryTransaction(Identity, Base):
     document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), index=True)
     material_batch_id: Mapped[int | None] = mapped_column(ForeignKey('material_batches.id'), index=True)
     finished_batch_id: Mapped[int | None] = mapped_column(ForeignKey('finished_batches.id'), index=True)
+    source_location_id: Mapped[int | None] = mapped_column(ForeignKey('locations.id'))
+    target_location_id: Mapped[int | None] = mapped_column(ForeignKey('locations.id'))
     kind: Mapped[str] = mapped_column(String(32), index=True)
     unit: Mapped[str] = mapped_column(ForeignKey('units.code'))
     before_quantity: Mapped[Decimal] = mapped_column(QTY)
@@ -311,7 +352,7 @@ class InventoryTransaction(Identity, Base):
     __table_args__ = (
         CheckConstraint('(material_batch_id IS NOT NULL AND finished_batch_id IS NULL) OR (material_batch_id IS NULL AND finished_batch_id IS NOT NULL)', name='one_batch_only'),
         CheckConstraint('before_quantity >= 0 AND after_quantity >= 0 AND change_quantity <> 0 AND before_quantity + change_quantity = after_quantity', name='balanced_quantities'),
-        CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound')", name='valid_kind'),
+        CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound','putaway','transfer','count_gain','count_loss','count_match','adjustment')", name='valid_kind'),
     )
 
 

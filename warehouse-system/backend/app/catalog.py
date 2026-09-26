@@ -2,11 +2,12 @@
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.mysql import insert as mysql_insert
+from uuid import uuid4
 
 from app.auth import SessionDep, UserDep, audit, require_permission
 from app.database import Base
 from app.models import FinishedProduct, Location, RawMaterial, Supplier, Unit, utcnow
-from app.schemas import ArchiveInput, Envelope, MaterialInput, ProductInput, SupplierInput
+from app.schemas import ArchiveInput, Envelope, LocationInput, MaterialInput, ProductInput, SupplierInput
 
 router = APIRouter(prefix='/api', tags=['基础资料'])
 
@@ -26,7 +27,7 @@ def public_record(record):
     from decimal import Decimal
     result = {}
     for column in record.__table__.columns:
-        if column.name == 'deleted_at':
+        if column.name == 'deleted_at' or isinstance(record, Location) and column.name == 'code':
             continue
         value = getattr(record, column.name)
         if isinstance(value, Decimal):
@@ -72,7 +73,8 @@ def register_catalog(path, model, schema, label):
         conditions = [model.deleted_at.is_(None)]
         if q.strip():
             # autoescape 将 %、_ 当作普通查询字符，避免通配符扩大范围。
-            conditions.append(or_(model.name.contains(q.strip(), autoescape=True), model.code.contains(q.strip(), autoescape=True)))
+            conditions.append(model.name.contains(q.strip(), autoescape=True) if model is Location else
+                              or_(model.name.contains(q.strip(), autoescape=True), model.code.contains(q.strip(), autoescape=True)))
         if is_active is not None:
             conditions.append(model.is_active == is_active)
         total = session.scalar(select(func.count()).select_from(model).where(*conditions))
@@ -85,10 +87,15 @@ def register_catalog(path, model, schema, label):
     def create_record(payload: schema, user: UserDep, session: SessionDep):
         require_permission(user, session, permission)
         validate(payload, session)
-        record = model(**payload.model_dump())
+        values = payload.model_dump()
+        if model is Location:
+            # Keep the historical NOT NULL/UNIQUE column without exposing it as a business identifier.
+            values['code'] = 'loc-' + uuid4().hex
+        record = model(**values)
         session.add(record)
         session.flush()
-        audit(session, user.id, 'create', model.__tablename__, record.id, {'code': record.code})
+        audit(session, user.id, 'create', model.__tablename__, record.id,
+              {'name': record.name} if model is Location else {'code': record.code})
         return Envelope(data=public_record(record))
 
     def update_record(identity: int, payload: schema, user: UserDep, session: SessionDep):
@@ -97,7 +104,8 @@ def register_catalog(path, model, schema, label):
         validate(payload, session, record)
         for field, value in payload.model_dump().items():
             setattr(record, field, value)
-        audit(session, user.id, 'update', model.__tablename__, record.id, {'code': record.code})
+        audit(session, user.id, 'update', model.__tablename__, record.id,
+              {'name': record.name} if model is Location else {'code': record.code})
         session.flush()
         return Envelope(data=public_record(record))
 
@@ -108,8 +116,9 @@ def register_catalog(path, model, schema, label):
             raise HTTPException(409, '该档案已被业务引用，请使用停用，不能删除')
         record.is_active = False
         record.deleted_at = utcnow()
-        audit(session, user.id, 'archive', model.__tablename__, identity, {'code': record.code})
-        return Envelope(message='已软删除；历史编码保留，不可重复使用')
+        audit(session, user.id, 'archive', model.__tablename__, identity,
+              {'name': record.name} if model is Location else {'code': record.code})
+        return Envelope(message='已软删除；历史记录保留' if model is Location else '已软删除；历史编码保留，不可重复使用')
 
     for suffix, method, endpoint, title in (
         ('', 'GET', list_records, '列表'), ('/{identity}', 'GET', get_record, '详情'),
@@ -123,4 +132,4 @@ def register_catalog(path, model, schema, label):
 register_catalog('materials', RawMaterial, MaterialInput, '原材料')
 register_catalog('products', FinishedProduct, ProductInput, '成品')
 register_catalog('suppliers', Supplier, SupplierInput, '供应商')
-register_catalog('locations', Location, ArchiveInput, '库位')
+register_catalog('locations', Location, LocationInput, '库位')

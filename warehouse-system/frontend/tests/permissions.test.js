@@ -3,11 +3,11 @@ import assert from 'node:assert/strict'
 import { canAccess, canOperate } from '../src/permissions.js'
 
 test('管理员可访问全部业务和系统页', () => {
-  for (const page of ['','materials','material-receipts','material-outbounds','products','boms','orders','issues','supplements','returns','losses','expiry','users','suppliers','locations','settings','logs']) assert.equal(canAccess('admin',page),true)
+  for (const page of ['','materials','material-receipts','material-putaways','material-location-stock','material-transfers','material-counts','material-outbounds','products','boms','orders','issues','supplements','returns','losses','expiry','users','suppliers','locations','settings','logs']) assert.equal(canAccess('admin',page),true)
 })
 test('五种角色都能查看全部页面', () => {
   for (const role of ['admin','warehouse','workshop_director','workshop','accountant'])
-    for (const page of ['','materials','products','orders','issues','supplements','returns','expiry','material-transactions','users','settings','logs'])
+    for (const page of ['','materials','products','orders','issues','supplements','returns','expiry','material-transactions','material-putaways','material-location-stock','material-transfers','material-counts','users','settings','logs'])
       assert.equal(canAccess(role,page),true)
 })
 test('操作权限区分档案、库存、生产和领补退', () => {

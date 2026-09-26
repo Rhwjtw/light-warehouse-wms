@@ -15,7 +15,7 @@ from app.database import SessionLocal
 from app.main import app
 from app.models import (User, Role, ProductionOrder, ProductionOrderMaterial, MaterialIssueRecord,
                         FinishedReceipt, FinishedBatch, FinishedProduct, BomHeader, BomItem,
-                        MaterialBatch, MaterialMovement, RawMaterial, Supplier, Location,
+                        MaterialBatch, MaterialMovement, MaterialTransfer, RawMaterial, Supplier, Location,
                         InventoryTransaction, StockDocument, OperationLog)
 from test_phase6 import PASSWORD
 from test_phase7 import setup_order, settle, balance, post_material
@@ -50,6 +50,7 @@ def committed_production():
             for model, condition in [
                 (InventoryTransaction, InventoryTransaction.document_id.in_(docs)),
                 (MaterialIssueRecord, MaterialIssueRecord.order_material_id.in_(materials)),
+                (MaterialTransfer, MaterialTransfer.document_id.in_(docs)),
                 (MaterialMovement, MaterialMovement.document_id.in_(docs)),
                 (FinishedReceipt, FinishedReceipt.document_id.in_(docs)),
                 (OperationLog, OperationLog.user_id == user_id),

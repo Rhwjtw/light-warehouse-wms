@@ -95,13 +95,14 @@ def order_data(session, order: ProductionOrder, *, include_details: bool = True)
         return result
     result['materials'] = [material_data(row) for row in material_rows(session, order.id)]
     records = session.execute(
-        select(MaterialIssueRecord, StockDocument, MaterialBatch, User, InventoryTransaction)
+        select(MaterialIssueRecord, StockDocument, MaterialBatch, User, InventoryTransaction, Location.name)
         .join(StockDocument, StockDocument.id == MaterialIssueRecord.document_id)
         .join(MaterialBatch, MaterialBatch.id == MaterialIssueRecord.batch_id)
         .join(User, User.id == StockDocument.operator_id)
         .join(InventoryTransaction,
               (InventoryTransaction.document_id == StockDocument.id)
               & (InventoryTransaction.material_batch_id == MaterialBatch.id))
+        .join(Location, Location.id == MaterialBatch.location_id)
         .join(ProductionOrderMaterial, ProductionOrderMaterial.id == MaterialIssueRecord.order_material_id)
         .where(ProductionOrderMaterial.production_order_id == order.id)
         .order_by(MaterialIssueRecord.id.desc())
@@ -113,6 +114,7 @@ def order_data(session, order: ProductionOrder, *, include_details: bool = True)
         'order_material_id': record.order_material_id,
         'batch_id': batch.id,
         'batch_no': batch.batch_no,
+        'location_name': location_name,
         'kind': record.kind,
         'quantity': decimal_text(record.quantity),
         'unit': batch.unit,
@@ -124,7 +126,7 @@ def order_data(session, order: ProductionOrder, *, include_details: bool = True)
         'operator_name': operator.display_name,
         'notes': document.notes,
         'created_at': document.created_at.isoformat(),
-    } for record, document, batch, operator, transaction in records]
+    } for record, document, batch, operator, transaction, location_name in records]
     return result
 
 
@@ -331,7 +333,7 @@ def post_material(session, user, order_id: int, payload, kind: str) -> dict:
     total = Decimal('0')
     for allocation in payload.allocations:
         batch = batch_map[allocation.batch_id]
-        if batch.material_id != material.id:
+        if batch.material_id != material.id or batch.stock_status != 'shelved' or batch.location_id is None:
             raise HTTPException(422, '所选批次不属于该生产单原材料')
         if batch.unit != material.unit:
             raise HTTPException(409, '批次单位与原材料库存单位不一致')
@@ -413,6 +415,8 @@ def post_material(session, user, order_id: int, payload, kind: str) -> dict:
             after_quantity=batch.remaining_quantity,
             operator_id=user.id,
             notes=payload.notes,
+            source_location_id=batch.location_id if change < 0 else None,
+            target_location_id=batch.location_id if change > 0 else None,
         )
 
     if kind == 'issue':
@@ -452,8 +456,8 @@ def fefo_suggestion(session, order_id: int, material_id: int, requested_quantity
     target = requested_quantity if requested_quantity is not None else remaining
     if target < 0 or target > MAX_QUANTITY:
         raise HTTPException(422, '建议数量超出范围')
-    rows = session.scalars(
-        select(MaterialBatch)
+    rows = session.execute(
+        select(MaterialBatch, Location.name)
         .join(RawMaterial, RawMaterial.id == MaterialBatch.material_id)
         .join(Supplier, Supplier.id == MaterialBatch.supplier_id)
         .join(Location, Location.id == MaterialBatch.location_id)
@@ -463,7 +467,7 @@ def fefo_suggestion(session, order_id: int, material_id: int, requested_quantity
     suggestions = []
     batches = []
     available = Decimal('0')
-    for batch in rows:
+    for batch, location_name in rows:
         # 按统一 FEFO 顺序依次拆分目标数量；库存不足时仍返回可用批次，并用 fully_satisfied 明示缺口。
         available += batch.remaining_quantity
         suggested = min(left, batch.remaining_quantity) if left > 0 else Decimal('0')
@@ -474,6 +478,8 @@ def fefo_suggestion(session, order_id: int, material_id: int, requested_quantity
         batches.append({
             'id': batch.id,
             'batch_no': batch.batch_no,
+            'location_id': batch.location_id,
+            'location_name': location_name,
             'remaining_quantity': decimal_text(batch.remaining_quantity),
             'unit': batch.unit,
             'expiry_date': batch.expiry_date.isoformat(),

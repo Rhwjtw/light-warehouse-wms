@@ -10,13 +10,14 @@ const Catalog = () => import('./views/Catalog.vue')
 const Users = () => import('./views/Users.vue')
 const Login = () => import('./views/Login.vue')
 const MaterialInventory = () => import('./views/MaterialInventory.vue')
+const MaterialLocations = () => import('./views/MaterialLocations.vue')
 const FinishedInventory = () => import('./views/FinishedInventory.vue')
 const Boms = () => import('./views/Boms.vue')
 const ProductionOrders = () => import('./views/ProductionOrders.vue')
 const Losses = () => import('./views/Losses.vue')
 
 export const menuGroups = [
-  { label: '原材料管理', items: [['materials', '原材料档案'], ['material-receipts', '原材料入库'], ['material-outbounds', '原材料出库'], ['material-stock', '原材料库存'], ['batches', '批次库存'], ['material-transactions', '库存流水']] },
+  { label: '原材料管理', items: [['materials', '原材料档案'], ['material-receipts', '原材料入库'], ['material-putaways', '原材料上架'], ['material-outbounds', '原材料出库'], ['material-stock', '原材料库存'], ['material-location-stock', '库位库存'], ['batches', '批次库存'], ['material-transfers', '原材料移库'], ['material-counts', '库存盘点'], ['material-transactions', '库存流水']] },
   { label: '成品管理', items: [['products', '成品档案'], ['finished-receipts', '成品入库'], ['finished-outbounds', '成品出库'], ['finished-stock', '成品库存']] },
   { label: '生产管理', items: [['boms', 'BOM 配方'], ['orders', '生产单'], ['issues', '车间领料'], ['supplements', '车间补料'], ['returns', '车间退料'], ['losses', '损耗统计']] },
   { label: '预警中心', items: [['expiry', '有效期预警']] },
@@ -29,7 +30,7 @@ const router = createRouter({
     { path: '/login', component: Login, meta: { title: '登录', public: true } },
     { path: '/', component: Dashboard, meta: { title: '首页' } },
     ...menuGroups.flatMap(group => group.items.map(([path, label]) => ({
-      path: `/${path}`, component: path === 'expiry' ? Expiry : path === 'settings' ? Settings : path === 'logs' ? OperationLogs : path === 'losses' ? Losses : path === 'boms' ? Boms : ['orders','issues','supplements','returns'].includes(path) ? ProductionOrders : ['finished-receipts','finished-outbounds','finished-stock'].includes(path) ? FinishedInventory : ['material-receipts','material-outbounds','material-stock','batches','material-transactions'].includes(path) ? MaterialInventory : path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : Dashboard,
+      path: `/${path}`, component: path === 'expiry' ? Expiry : path === 'settings' ? Settings : path === 'logs' ? OperationLogs : path === 'losses' ? Losses : path === 'boms' ? Boms : ['orders','issues','supplements','returns'].includes(path) ? ProductionOrders : ['finished-receipts','finished-outbounds','finished-stock'].includes(path) ? FinishedInventory : ['material-putaways','material-location-stock','material-transfers','material-counts'].includes(path) ? MaterialLocations : ['material-receipts','material-outbounds','material-stock','batches','material-transactions'].includes(path) ? MaterialInventory : path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : Dashboard,
       meta: { title: label, group: group.label, resource: path },
     }))),
     { path: '/:pathMatch(.*)*', redirect: '/' },

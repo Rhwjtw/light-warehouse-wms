@@ -56,7 +56,10 @@ def context():
 
 
 def create_catalog(client, headers, path, code, name, **extra):
-    response = client.post(f'/api/{path}', headers=headers['admin'], json={'code': code, 'name': name, **extra})
+    payload = {'name': name, **extra}
+    if path != 'locations':
+        payload['code'] = code
+    response = client.post(f'/api/{path}', headers=headers['admin'], json=payload)
     assert response.status_code == 200, response.text
     return response.json()['data']
 
@@ -90,10 +93,16 @@ def scenario(context, suffix, *, bom_quantities=('20',), stock_batches=()):
             'production_date': str(business_today() - timedelta(days=10)),
             'expiry_date': str(business_today() + timedelta(days=expiry_delta)),
             'supplier_id': supplier['id'],
-            'location_id': location['id'],
         })
         assert receipt.status_code == 200, receipt.text
-        batches.append(receipt.json()['data']['batch_id'])
+        receipt_id = receipt.json()['data']['id']
+        movement_id = client.get(f'/api/material-receipts/{receipt_id}', headers=headers['warehouse']).json()['data']['receipt_movement_id']
+        putaway = client.post('/api/material-putaways', headers=headers['warehouse'], json={
+            'request_id': uuid4().hex, 'receipt_movement_id': movement_id,
+            'location_id': location['id'], 'quantity': quantity,
+        })
+        assert putaway.status_code == 200, putaway.text
+        batches.append(putaway.json()['data']['target_batch_id'])
     order_response = client.post('/api/production-orders', headers=headers['admin'], json={
         'finished_product_id': product['id'], 'planned_quantity': '1000', 'notes': '第六阶段测试',
     })

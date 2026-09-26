@@ -68,15 +68,17 @@ def test_authentication_and_secret_redaction(context):
 def test_catalog_crud_search_pagination_and_soft_delete(context, resource, extra):
     client, headers, _, _, prefix = context
     h = headers['admin']
-    payload = {'code': prefix, 'name': '  专用测试档案  ', **extra}
+    payload = {'name': '  专用测试档案  ', **extra}
+    if resource != 'locations': payload['code'] = prefix
     created = client.post('/api/'+resource, headers=h, json=payload)
     assert created.status_code == 200, created.text
     data = created.json()['data']; identity = data['id']
     assert data['name'] == '专用测试档案'
     if resource == 'products': assert data['unit'] == '盒'
     if resource == 'materials': assert data['min_stock'] == '1.123456'
-    assert client.post('/api/'+resource, headers=h, json=payload).status_code == 409
-    listed = client.get('/api/'+resource, headers=h, params={'q': prefix, 'page_size': 1}).json()['data']
+    if resource != 'locations':
+        assert client.post('/api/'+resource, headers=h, json=payload).status_code == 409
+    listed = client.get('/api/'+resource, headers=h, params={'q': '专用测试档案' if resource == 'locations' else prefix, 'page_size': 1}).json()['data']
     assert listed['total'] == 1 and len(listed['items']) == 1
     assert client.get('/api/'+resource, headers=h, params={'q': prefix, 'page': 2, 'page_size': 1}).json()['data']['items'] == []
     assert client.get('/api/'+resource, headers=h, params={'q': '%'}).json()['data']['total'] == 0
@@ -88,7 +90,8 @@ def test_catalog_crud_search_pagination_and_soft_delete(context, resource, extra
     assert client.get(f'/api/{resource}/{identity}', headers=h).json()['data']['name'] == '已编辑'
     assert client.delete(f'/api/{resource}/{identity}', headers=h).status_code == 200
     assert client.get(f'/api/{resource}/{identity}', headers=h).status_code == 404
-    assert client.post('/api/'+resource, headers=h, json=payload).status_code == 409
+    if resource != 'locations':
+        assert client.post('/api/'+resource, headers=h, json=payload).status_code == 409
 
 
 def test_invalid_quantities_units_and_inventory_injection(context):
@@ -107,7 +110,8 @@ def test_role_archive_permissions_and_user_read_only(context, role):
     client, headers, users, _, prefix = context
     for resource in ('materials', 'products', 'suppliers', 'locations'):
         assert client.get('/api/'+resource, headers=headers[role]).status_code == 200
-        payload = {'code': prefix, 'name': '越权', **({'unit': 'kg'} if resource == 'materials' else {})}
+        payload = {'name': '越权', **({'unit': 'kg'} if resource == 'materials' else {})}
+        if resource != 'locations': payload['code'] = prefix
         allowed = resource in ({'warehouse': {'materials', 'products', 'suppliers', 'locations'},
                                 'workshop_director': set(), 'workshop': set(),
                                 'accountant': {'materials', 'products', 'suppliers'}}[role])

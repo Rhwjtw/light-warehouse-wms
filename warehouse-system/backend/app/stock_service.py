@@ -25,6 +25,7 @@ def fefo_conditions(material_id: int):
     """唯一的 FEFO 可用批次口径；普通出库与生产领补料共同复用。"""
     return (
         MaterialBatch.material_id == material_id,
+        MaterialBatch.stock_status == 'shelved', MaterialBatch.location_id.is_not(None),
         MaterialBatch.remaining_quantity > 0,
         MaterialBatch.expiry_date >= business_today(),
         MaterialBatch.unit == RawMaterial.unit,
@@ -93,32 +94,18 @@ def post_material(session, user, payload, kind):
         if payload.production_date > today or payload.expiry_date < payload.production_date or payload.expiry_date < today:
             raise HTTPException(422, '生产日期不能晚于今天，到期日期不能早于生产日期或今天')
         active_record(session, Supplier, payload.supplier_id)
-        active_record(session, Location, payload.location_id)
-        batch = session.scalar(select(MaterialBatch).where(
-            MaterialBatch.material_id == material.id, MaterialBatch.batch_no == payload.batch_no,
-            MaterialBatch.supplier_id == payload.supplier_id, MaterialBatch.location_id == payload.location_id
-        ).with_for_update())
-        if batch:
-            # 同一业务批次可多次入库，但日期和库存单位必须完全一致，不能把不同货物静默混批。
-            if (batch.unit, batch.production_date, batch.expiry_date) != (material.unit, payload.production_date, payload.expiry_date):
-                raise HTTPException(409, '同批号、供应商及库位的单位或日期不一致')
-            before = batch.remaining_quantity
-            if batch.received_quantity + quantity > MAX_QUANTITY:
-                raise HTTPException(422, '批次累计数量超出范围')
-            batch.received_quantity += quantity
-            batch.remaining_quantity += quantity
-        else:
-            before = Decimal('0')
-            batch = MaterialBatch(material_id=material.id, batch_no=payload.batch_no,
-                                  received_quantity=quantity, remaining_quantity=quantity, unit=material.unit,
-                                  production_date=payload.production_date, expiry_date=payload.expiry_date,
-                                  supplier_id=payload.supplier_id, location_id=payload.location_id, notes=payload.notes)
-            session.add(batch)
+        # Every receipt has its own pending batch, so shelving can enforce the exact receipt limit.
+        before = Decimal('0')
+        batch = MaterialBatch(material_id=material.id, batch_no=payload.batch_no,
+                              received_quantity=quantity, remaining_quantity=quantity, unit=material.unit,
+                              production_date=payload.production_date, expiry_date=payload.expiry_date,
+                              supplier_id=payload.supplier_id, location_id=None, stock_status='pending', notes=payload.notes)
+        session.add(batch)
         change = quantity
     else:
         # 普通出库锁定批次后重新检查归属、单位、关联档案、有效期和余额，不信任页面选择时的旧状态。
         batch = session.scalar(select(MaterialBatch).where(MaterialBatch.id == payload.batch_id).with_for_update())
-        if not batch or batch.material_id != material.id:
+        if not batch or batch.material_id != material.id or batch.stock_status != 'shelved' or batch.location_id is None:
             raise HTTPException(422, '批次不存在或不属于所选原料')
         if batch.unit != material.unit:
             raise HTTPException(409, '批次单位与原料单位不一致')
@@ -134,11 +121,14 @@ def post_material(session, user, payload, kind):
     session.flush()
     # 单据明细、批次余额、库存流水和审计全部只 flush；由请求级 SessionDep 在最外层统一提交或回滚。
     session.add(MaterialMovement(document_id=document.id, batch_id=batch.id, quantity=quantity,
-                                 input_quantity=payload.quantity, input_unit=payload.unit))
+                                 input_quantity=payload.quantity, input_unit=payload.unit,
+                                 shelved_quantity=Decimal('0') if kind == 'material_receipt' else None))
     session.flush()
     session.add(InventoryTransaction(document_id=document.id, material_batch_id=batch.id, kind=kind,
                                     unit=batch.unit, before_quantity=before, change_quantity=change,
-                                    after_quantity=batch.remaining_quantity, operator_id=user.id, notes=payload.notes))
+                                    after_quantity=batch.remaining_quantity, operator_id=user.id, notes=payload.notes,
+                                    source_location_id=batch.location_id if change < 0 else None,
+                                    target_location_id=batch.location_id if change > 0 else None))
     session.flush()
     audit(session, user.id, kind, 'stock_documents', document.id,
           {'batch_id': batch.id, 'quantity': format(quantity, 'f'), 'unit': batch.unit})

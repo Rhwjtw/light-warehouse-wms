@@ -152,7 +152,7 @@ def test_business_timezone_and_today_boundary(context):
         moments = iter([start-timedelta(seconds=1),start,end-timedelta(seconds=1),end])
         def stamp(session, *args):
             for row in session.new:
-                if isinstance(row,InventoryTransaction):
+                if isinstance(row,InventoryTransaction) and row.kind == 'material_receipt':
                     row.created_at = next(moments)
         event.listen(Session,'before_flush',stamp)
         try:

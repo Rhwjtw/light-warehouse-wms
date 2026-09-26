@@ -16,8 +16,10 @@ from app.models import MaterialBatch, StockDocument, MaterialMovement, Inventory
 def inventory(context):
     client, headers, _, connection, prefix = context
     def create(resource, **extra):
+        payload = {'name': prefix, **extra}
+        if resource != 'locations': payload['code'] = prefix
         response = client.post('/api/' + resource, headers=headers['admin'],
-                               json={'code': prefix, 'name': prefix, **extra})
+                               json=payload)
         assert response.status_code == 200, response.text
         return response.json()['data']['id']
     today = stock_service.business_today()
@@ -29,7 +31,19 @@ def inventory(context):
 
 def receive(inv, **changes):
     client, headers, _, payload = inv
-    return client.post('/api/material-receipts', headers=headers['warehouse'], json={**payload, **changes})
+    body = {**payload, **changes}
+    body.pop('location_id', None)
+    return client.post('/api/material-receipts', headers=headers['warehouse'], json=body)
+
+
+def shelf(inv, response):
+    client, headers, _, payload = inv
+    detail = client.get(f"/api/material-receipts/{response.json()['data']['id']}", headers=headers['warehouse']).json()['data']
+    result = client.post('/api/material-putaways', headers=headers['warehouse'], json={
+        'request_id': uuid4().hex, 'receipt_movement_id': detail['receipt_movement_id'],
+        'location_id': payload['location_id'], 'quantity': detail['pending_quantity'],
+    })
+    return result
 
 
 def out(inv, batch_id, **changes):
@@ -42,15 +56,16 @@ def test_receipt_outbound_queries_idempotency(inventory):
     client, h, _, p = inventory
     response = receive(inventory)
     assert response.status_code == 200, response.text
-    data = response.json()['data']; batch_id = data['batch_id']
+    data = response.json()['data']; batch_id = shelf(inventory, response).json()['data']['target_batch_id']
     assert Decimal(data['after_quantity']) == 10
     assert receive(inventory).json()['data'] == data
     assert receive(inventory, quantity='11000').status_code == 409
     second = receive(inventory, request_id=uuid4().hex, quantity='1000')
     assert second.status_code == 200
-    assert Decimal(second.json()['data']['after_quantity']) == 11
+    assert Decimal(second.json()['data']['after_quantity']) == 1
+    assert shelf(inventory, second).status_code == 200
     mismatch = receive(inventory, request_id=uuid4().hex, expiry_date=str(stock_service.business_today()+timedelta(days=11)))
-    assert mismatch.status_code == 409
+    assert mismatch.status_code == 200 and shelf(inventory, mismatch).status_code == 409
     request_id = uuid4().hex
     result = out(inventory, batch_id, request_id=request_id)
     assert result.status_code == 200, result.text
@@ -84,8 +99,8 @@ def test_invalid_receipt(inventory, change):
 def test_fefo_expiry_manual_and_permissions(inventory, monkeypatch):
     client, h, connection, p = inventory
     today = stock_service.business_today()
-    first = receive(inventory, expiry_date=str(today)).json()['data']['batch_id']
-    later = receive(inventory, request_id=uuid4().hex, batch_no=p['batch_no']+'later').json()['data']['batch_id']
+    first = shelf(inventory, receive(inventory, expiry_date=str(today))).json()['data']['target_batch_id']
+    later = shelf(inventory, receive(inventory, request_id=uuid4().hex, batch_no=p['batch_no']+'later')).json()['data']['target_batch_id']
     recommended = client.get('/api/material-fefo',headers=h['warehouse'],params={'material_id':p['material_id']})
     assert recommended.status_code == 200, recommended.text
     assert [r['id'] for r in recommended.json()['data']['items']] == [first,later]
@@ -99,8 +114,9 @@ def test_fefo_expiry_manual_and_permissions(inventory, monkeypatch):
     assert [r['id'] for r in client.get('/api/material-fefo',headers=h['warehouse'],params={'material_id':p['material_id']}).json()['data']['items']] == [later]
     assert receive(inventory,request_id=uuid4().hex,batch_no='expired',expiry_date=str(today)).status_code == 422
     assert out(inventory,2147483647).status_code == 422
-    assert client.post('/api/material-receipts',headers=h['workshop'],json=p).status_code == 403
-    assert client.post('/api/material-receipts',json=p).status_code == 401
+    receipt_body = {key: value for key, value in p.items() if key != 'location_id'}
+    assert client.post('/api/material-receipts',headers=h['workshop'],json=receipt_body).status_code == 403
+    assert client.post('/api/material-receipts',json=receipt_body).status_code == 401
     assert client.get('/api/material-stock').status_code == 401
     with Session(bind=connection,join_transaction_mode='create_savepoint') as session:
         from app.models import RawMaterial
@@ -113,7 +129,7 @@ def test_fefo_expiry_manual_and_permissions(inventory, monkeypatch):
 @pytest.mark.parametrize('direction', ['receipt','new_receipt','outbound'])
 def test_complete_rollback(inventory, monkeypatch, failure, direction):
     client,h,connection,p=inventory
-    batch_id=receive(inventory).json()['data']['batch_id']
+    batch_id=shelf(inventory, receive(inventory)).json()['data']['target_batch_id']
     with Session(bind=connection,join_transaction_mode='create_savepoint') as session:
         before={model:session.scalar(select(func.count()).select_from(model)) for model in
                 (StockDocument,MaterialMovement,InventoryTransaction,OperationLog)}
@@ -164,8 +180,8 @@ def test_conversion_dates_and_fefo_ties(inventory):
     for change in ({'production_date':str(today+timedelta(days=1))},
                    {'expiry_date':str(today-timedelta(days=11))}):
         assert receive(inventory,**change).status_code==422
-    first=receive(inventory).json()['data']['batch_id']
-    second=receive(inventory,request_id=uuid4().hex,batch_no=p['batch_no']+'2').json()['data']['batch_id']
+    first=shelf(inventory, receive(inventory)).json()['data']['target_batch_id']
+    second=shelf(inventory, receive(inventory,request_id=uuid4().hex,batch_no=p['batch_no']+'2')).json()['data']['target_batch_id']
     with Session(bind=connection,join_transaction_mode='create_savepoint') as session:
         session.get(MaterialBatch,second).received_at=session.get(MaterialBatch,first).received_at
         session.commit()

@@ -111,12 +111,14 @@ def grants(run_root, data, port):
         with connection.cursor() as cursor:
             cursor.execute('SHOW TABLES')
             tables = [row[0] for row in cursor.fetchall()]
-            if len(tables) != 24 or 'alembic_version' not in tables:
-                raise RuntimeError('迁移后的测试库必须有 23 张业务表和版本表')
+            legacy = len(tables) == 24 and not {'material_transfers', 'material_counts', 'material_adjustments'}.intersection(tables)
+            current = len(tables) == 27 and {'material_transfers', 'material_counts', 'material_adjustments'}.issubset(tables)
+            if 'alembic_version' not in tables or not (legacy or current):
+                raise RuntimeError('隔离测试库表结构必须是 0010 或 0011 版本')
             for table in tables:
                 if table != 'alembic_version':
                     cursor.execute(f"GRANT INSERT ON `{DATABASE}`.`{table}` TO '{APP_USER}'@'127.0.0.1'")
-                if table not in ('alembic_version', 'inventory_transactions', 'operation_logs'):
+                if table not in ('alembic_version', 'inventory_transactions', 'operation_logs', 'material_transfers', 'material_counts', 'material_adjustments'):
                     cursor.execute(f"GRANT UPDATE, DELETE ON `{DATABASE}`.`{table}` TO '{APP_USER}'@'127.0.0.1'")
     print('隔离应用账号授权完成')
 
