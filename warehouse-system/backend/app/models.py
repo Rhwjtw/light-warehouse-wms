@@ -2,7 +2,7 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, Computed, Date, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Computed, Date, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base, UTCDateTime
@@ -209,11 +209,28 @@ class StockDocument(Identity, Base):
     business_type: Mapped[str | None] = mapped_column(String(20))
     reference_no: Mapped[str | None] = mapped_column(String(120))
     kind: Mapped[str] = mapped_column(String(32), index=True)
+    reverses_document_id: Mapped[int | None] = mapped_column(Integer)
+    reverses_kind: Mapped[str | None] = mapped_column(String(32))
+    original_document_no_snapshot: Mapped[str | None] = mapped_column(String(48))
+    reversal_reason: Mapped[str | None] = mapped_column(Text)
     operator_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
-    __table_args__ = (CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound','putaway','transfer','count_gain','count_loss','count_match','adjustment')", name='valid_kind'),
-                     CheckConstraint("business_type IS NULL OR business_type IN ('normal','production')", name='valid_business_type'))
+    __table_args__ = (
+        UniqueConstraint('id', 'kind', name='uq_stock_documents_id_kind'),
+        UniqueConstraint('reverses_document_id', name='uq_stock_documents_reverses_document_id'),
+        ForeignKeyConstraint(['reverses_document_id', 'reverses_kind'],
+                             ['stock_documents.id', 'stock_documents.kind'], name='fk_stock_documents_original_kind'),
+        CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound','putaway','transfer','count_gain','count_loss','count_match','adjustment','reversal')", name='valid_kind'),
+        CheckConstraint("business_type IS NULL OR business_type IN ('normal','production')", name='valid_business_type'),
+        CheckConstraint("(kind <> 'reversal' AND reverses_document_id IS NULL AND reverses_kind IS NULL "
+                        "AND original_document_no_snapshot IS NULL AND reversal_reason IS NULL) OR "
+                        "(kind = 'reversal' AND reverses_document_id IS NOT NULL AND reverses_kind IS NOT NULL "
+                        "AND reverses_kind IN ('material_outbound','finished_outbound') "
+                        "AND original_document_no_snapshot IS NOT NULL "
+                        "AND reversal_reason IS NOT NULL AND CHAR_LENGTH(TRIM(reversal_reason)) > 0)",
+                        name='valid_reversal'),
+    )
 
 
 class MaterialMovement(Identity, Base):
@@ -337,6 +354,8 @@ class InventoryTransaction(Identity, Base):
     # 原料与成品共用的不可随意修改库存流水；前量、变动量、后量必须形成可复核的恒等式。
     __tablename__ = 'inventory_transactions'
     document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), index=True)
+    reverses_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey('inventory_transactions.id', name='fk_inventory_transactions_reverses_transaction_id'))
     material_batch_id: Mapped[int | None] = mapped_column(ForeignKey('material_batches.id'), index=True)
     finished_batch_id: Mapped[int | None] = mapped_column(ForeignKey('finished_batches.id'), index=True)
     source_location_id: Mapped[int | None] = mapped_column(ForeignKey('locations.id'))
@@ -350,9 +369,12 @@ class InventoryTransaction(Identity, Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     __table_args__ = (
+        UniqueConstraint('reverses_transaction_id', name='uq_inventory_transactions_reverses_transaction_id'),
         CheckConstraint('(material_batch_id IS NOT NULL AND finished_batch_id IS NULL) OR (material_batch_id IS NULL AND finished_batch_id IS NOT NULL)', name='one_batch_only'),
         CheckConstraint('before_quantity >= 0 AND after_quantity >= 0 AND change_quantity <> 0 AND before_quantity + change_quantity = after_quantity', name='balanced_quantities'),
-        CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound','putaway','transfer','count_gain','count_loss','count_match','adjustment')", name='valid_kind'),
+        CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound','putaway','transfer','count_gain','count_loss','count_match','adjustment','reversal')", name='valid_kind'),
+        CheckConstraint("(kind = 'reversal' AND reverses_transaction_id IS NOT NULL) "
+                        "OR (kind <> 'reversal' AND reverses_transaction_id IS NULL)", name='valid_reversal'),
     )
 
 

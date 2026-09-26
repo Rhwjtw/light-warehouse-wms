@@ -44,6 +44,13 @@ def committed_production():
             orders = list(session.scalars(select(ProductionOrder.id).where(ProductionOrder.created_by == user_id)))
             materials = list(session.scalars(select(ProductionOrderMaterial.id).where(ProductionOrderMaterial.production_order_id.in_(orders))))
             docs = list(session.scalars(select(StockDocument.id).where(StockDocument.operator_id == user_id)))
+            # 自关联外键要求先清理冲销流水和冲销单，再清理原始记录。
+            reversal_docs = list(session.scalars(select(StockDocument.id).where(
+                StockDocument.id.in_(docs), StockDocument.kind == 'reversal')))
+            if reversal_docs:
+                session.execute(delete(InventoryTransaction).where(InventoryTransaction.document_id.in_(reversal_docs)))
+                session.execute(delete(StockDocument).where(StockDocument.id.in_(reversal_docs)))
+                docs = [identity for identity in docs if identity not in reversal_docs]
             products = list(session.scalars(select(FinishedProduct.id).where(FinishedProduct.code.startswith(prefix))))
             raw = list(session.scalars(select(RawMaterial.id).where(RawMaterial.code.startswith(prefix))))
             boms = list(session.scalars(select(BomHeader.id).where(BomHeader.product_id.in_(products))))

@@ -1,6 +1,7 @@
 """成品查询及记账接口；不提供编辑或删除历史记录的入口。"""
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select, func, case, or_
+from sqlalchemy.orm import aliased
 
 from app.auth import SessionDep, UserDep
 from app.models import FinishedProduct, FinishedBatch, FinishedReceipt, StockDocument, InventoryTransaction, User
@@ -42,13 +43,16 @@ def inventory_detail(identity: int, user: UserDep, session: SessionDep):
 
 
 def records_query(kind=None, q='', product_id=None):
+    reversed_document = aliased(StockDocument)
     query = select(StockDocument.id, StockDocument.document_no, StockDocument.kind, StockDocument.created_at,
+                   StockDocument.reverses_document_id, reversed_document.id.label('reversed_by_document_id'),
                    StockDocument.business_date, StockDocument.business_type, StockDocument.reference_no, StockDocument.notes,
                    FinishedProduct.id.label('product_id'), FinishedProduct.code.label('product_code'), FinishedProduct.name.label('product_name'),
                    InventoryTransaction.unit, InventoryTransaction.before_quantity, InventoryTransaction.change_quantity,
                    InventoryTransaction.after_quantity, func.abs(InventoryTransaction.change_quantity).label('quantity'),
                    User.display_name.label('operator_name'), FinishedReceipt.production_order_id)
     query = query.select_from(StockDocument).join(InventoryTransaction, InventoryTransaction.document_id == StockDocument.id)
+    query = query.outerjoin(reversed_document, reversed_document.reverses_document_id == StockDocument.id)
     query = query.join(FinishedBatch, FinishedBatch.id == InventoryTransaction.finished_batch_id).join(FinishedProduct)
     query = query.join(User, User.id == StockDocument.operator_id).outerjoin(FinishedReceipt, FinishedReceipt.document_id == StockDocument.id)
     if kind:

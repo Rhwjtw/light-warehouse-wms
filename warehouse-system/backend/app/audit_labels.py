@@ -11,4 +11,5 @@ ACTIONS = {'login': '登录', 'login_failed': '登录失败', 'logout': '退出�
            'create_production_order': '创建生产单', 'update_production_order': '修改生产单',
            'cancel_production_order': '取消生产单', 'complete_production_order': '完成生产',
            'production_issue': '生产领料', 'production_supplement': '生产补料', 'production_return': '生产退料',
-           'register_actual_quantity': '登记实际产量', 'update_settings': '修改预警设置'}
+           'register_actual_quantity': '登记实际产量', 'update_settings': '修改预警设置',
+           'reverse_stock_document': '冲销库存单据'}

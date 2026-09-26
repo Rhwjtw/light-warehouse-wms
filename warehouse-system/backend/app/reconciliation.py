@@ -26,8 +26,11 @@ def reconcile(session):
     documents = {row.id: row for row in session.scalars(select(StockDocument))}
     ledger = list(session.scalars(select(InventoryTransaction).order_by(InventoryTransaction.id)))
     chains = defaultdict(list)
+    ledger_by_document = defaultdict(list)
+    ledger_by_id = {row.id: row for row in ledger}
     actual = Counter()
     for row in ledger:
+        ledger_by_document[row.document_id].append(row)
         scope = 'material' if row.material_batch_id is not None else 'finished'
         batch_id = row.material_batch_id if scope == 'material' else row.finished_batch_id
         chains[scope, batch_id].append(row)
@@ -35,6 +38,47 @@ def reconcile(session):
         doc = documents.get(row.document_id)
         if not doc or (doc.kind, doc.operator_id) != (row.kind, row.operator_id):
             problem('ledger', row.id, 'document kind/operator mismatch')
+
+    reversals_by_original = defaultdict(list)
+    for doc in documents.values():
+        if doc.kind != 'reversal':
+            if any((doc.reverses_document_id, doc.reverses_kind,
+                    doc.original_document_no_snapshot, doc.reversal_reason)):
+                problem('reversal', doc.id, 'ordinary document has reversal fields')
+            continue
+        original = documents.get(doc.reverses_document_id)
+        if (original is None or original.kind not in ('material_outbound', 'finished_outbound')
+                or doc.reverses_kind != original.kind
+                or doc.original_document_no_snapshot != original.document_no
+                or not doc.reversal_reason or not doc.reversal_reason.strip()):
+            problem('reversal', doc.id, 'missing, unsupported or inconsistent original document')
+            continue
+        reversals_by_original[original.id].append(doc)
+        source_rows = ledger_by_document[original.id]
+        reversed_rows = ledger_by_document[doc.id]
+        if len(source_rows) != 1 or len(reversed_rows) != 1:
+            problem('reversal', doc.id, 'outbound reversal must pair exactly one ledger row')
+            continue
+        source, reverse = source_rows[0], reversed_rows[0]
+        if (reverse.reverses_transaction_id != source.id or reverse.kind != 'reversal'
+                or reverse.material_batch_id != source.material_batch_id
+                or reverse.finished_batch_id != source.finished_batch_id
+                or reverse.unit != source.unit or reverse.change_quantity != -source.change_quantity
+                or reverse.source_location_id is not None
+                or reverse.target_location_id != source.source_location_id):
+            problem('reversal', doc.id, 'reverse ledger does not invert its original row')
+    for original_id, rows in reversals_by_original.items():
+        if len(rows) != 1:
+            problem('reversal', original_id, 'original document reversed more than once')
+    for row in ledger:
+        if row.kind == 'reversal':
+            source = ledger_by_id.get(row.reverses_transaction_id)
+            doc = documents.get(row.document_id)
+            if (source is None or doc is None or doc.kind != 'reversal'
+                    or source.document_id != doc.reverses_document_id):
+                problem('reversal', row.id, 'orphan or incorrectly linked reverse ledger')
+        elif row.reverses_transaction_id is not None:
+            problem('reversal', row.id, 'ordinary ledger has reverse link')
 
     counts = {}
     for scope, model in [('material', MaterialBatch), ('finished', FinishedBatch)]:
@@ -113,6 +157,12 @@ def reconcile(session):
             problem('adjustment', row.id, 'missing or inconsistent adjustment document')
         else:
             expected[row.document_id, 'material', row.batch_id, 'adjustment', row.change_quantity] += 1
+    for original_id, rows in reversals_by_original.items():
+        for reversal in rows:
+            for source in ledger_by_document[original_id]:
+                scope = 'material' if source.material_batch_id is not None else 'finished'
+                batch_id = source.material_batch_id if scope == 'material' else source.finished_batch_id
+                expected[reversal.id, scope, batch_id, 'reversal', -source.change_quantity] += 1
     for key in expected.keys() | actual.keys():
         if expected[key] != actual[key]:
             problem('document', key[0], 'details and ledger differ')

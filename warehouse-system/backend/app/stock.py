@@ -233,10 +233,11 @@ def stock(user: UserDep, session: SessionDep, q: str = Query('', max_length=120)
 @router.get('/material-transactions', response_model=Envelope)
 def transactions(user: UserDep, session: SessionDep, q: str = Query('', max_length=120),
                  material_id: int | None = Query(None, gt=0), batch_id: int | None = Query(None, gt=0),
-                 kind: str | None = Query(None, pattern='^(material_receipt|material_outbound|issue|supplement|return|putaway|transfer|count_gain|count_loss|adjustment)$'),
+                 kind: str | None = Query(None, pattern='^(material_receipt|material_outbound|issue|supplement|return|putaway|transfer|count_gain|count_loss|adjustment|reversal)$'),
                  location_id: int | None = Query(None, gt=0),
                  page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     # 统一流水同时关联普通出入库明细和生产领补退明细，便于从库存变化追溯到原始输入和生产单。
+    reversed_document = aliased(StockDocument)
     source_location = aliased(Location)
     target_location = aliased(Location)
     query = select(InventoryTransaction.id, InventoryTransaction.created_at, InventoryTransaction.kind,
@@ -244,6 +245,8 @@ def transactions(user: UserDep, session: SessionDep, q: str = Query('', max_leng
                    MaterialBatch.id.label('batch_id'), MaterialBatch.batch_no, InventoryTransaction.unit,
                    InventoryTransaction.before_quantity, InventoryTransaction.change_quantity, InventoryTransaction.after_quantity,
                    StockDocument.id.label('document_id'), StockDocument.document_no, User.display_name.label('operator_name'),
+                   InventoryTransaction.reverses_transaction_id, StockDocument.reverses_document_id,
+                   reversed_document.id.label('reversed_by_document_id'),
                    InventoryTransaction.source_location_id, source_location.name.label('source_location_name'),
                    InventoryTransaction.target_location_id, target_location.name.label('target_location_name'),
                    InventoryTransaction.notes,
@@ -252,6 +255,7 @@ def transactions(user: UserDep, session: SessionDep, q: str = Query('', max_leng
                    ProductionOrder.id.label('production_order_id'), ProductionOrder.order_no.label('production_order_no'))
     query = query.select_from(InventoryTransaction).join(MaterialBatch, MaterialBatch.id == InventoryTransaction.material_batch_id)
     query = query.join(RawMaterial).join(StockDocument, StockDocument.id == InventoryTransaction.document_id)
+    query = query.outerjoin(reversed_document, reversed_document.reverses_document_id == StockDocument.id)
     query = query.join(User, User.id == InventoryTransaction.operator_id)
     query = query.outerjoin(source_location, source_location.id == InventoryTransaction.source_location_id)
     query = query.outerjoin(target_location, target_location.id == InventoryTransaction.target_location_id)

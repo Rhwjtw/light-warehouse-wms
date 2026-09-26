@@ -3,11 +3,11 @@ import assert from 'node:assert/strict'
 import { canAccess, canOperate } from '../src/permissions.js'
 
 test('管理员可访问全部业务和系统页', () => {
-  for (const page of ['','materials','material-receipts','material-putaways','material-location-stock','material-transfers','material-counts','material-outbounds','products','boms','orders','issues','supplements','returns','losses','expiry','users','suppliers','locations','settings','logs']) assert.equal(canAccess('admin',page),true)
+  for (const page of ['','materials','material-receipts','material-putaways','material-location-stock','material-transfers','material-counts','material-outbounds','products','boms','orders','issues','supplements','returns','losses','expiry','users','suppliers','locations','settings','logs','reversals']) assert.equal(canAccess('admin',page),true)
 })
 test('五种角色都能查看全部页面', () => {
   for (const role of ['admin','warehouse','workshop_director','workshop','accountant'])
-    for (const page of ['','materials','products','orders','issues','supplements','returns','expiry','material-transactions','material-putaways','material-location-stock','material-transfers','material-counts','users','settings','logs'])
+    for (const page of ['','materials','products','orders','issues','supplements','returns','expiry','material-transactions','material-putaways','material-location-stock','material-transfers','material-counts','users','settings','logs','reversals'])
       assert.equal(canAccess(role,page),true)
 })
 test('操作权限区分档案、库存、生产和领补退', () => {
@@ -25,6 +25,8 @@ test('操作权限区分档案、库存、生产和领补退', () => {
   assert.equal(canOperate('accountant','bom.write'),true)
   assert.equal(canOperate('accountant','production.order.write'),true)
   assert.equal(canOperate('accountant','production.manage'),false)
+  for (const role of ['admin', 'warehouse']) assert.equal(canOperate(role, 'stock.reversal.write'), true)
+  for (const role of ['workshop_director', 'workshop', 'accountant']) assert.equal(canOperate(role, 'stock.reversal.write'), false)
 })
 test('未知角色和未登录用户拒绝访问', () => {
   for (const role of [undefined,null,'','other']) assert.equal(canAccess(role,'orders'),false)

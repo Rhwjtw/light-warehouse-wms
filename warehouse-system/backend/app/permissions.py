@@ -5,7 +5,7 @@ ROLE_PERMISSIONS = {
     'warehouse': {
         'material.archive.write', 'material.inventory.write',
         'finished.archive.write', 'finished.inventory.write',
-        'supplier.write', 'location.write',
+        'supplier.write', 'location.write', 'stock.reversal.write',
     },
     'workshop_director': {
         'bom.write', 'production.order.write', 'production.manage',

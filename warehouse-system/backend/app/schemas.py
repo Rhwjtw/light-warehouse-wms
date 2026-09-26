@@ -150,6 +150,12 @@ class MaterialAdjustmentInput(InputModel):
     reason: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
 
 
+class StockReversalInput(InputModel):
+    request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 class FinishedStockInput(InputModel):
     request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
     product_id: int = Field(gt=0)

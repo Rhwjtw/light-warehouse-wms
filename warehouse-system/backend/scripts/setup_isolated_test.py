@@ -118,7 +118,7 @@ def grants(run_root, data, port):
             for table in tables:
                 if table != 'alembic_version':
                     cursor.execute(f"GRANT INSERT ON `{DATABASE}`.`{table}` TO '{APP_USER}'@'127.0.0.1'")
-                if table not in ('alembic_version', 'inventory_transactions', 'operation_logs', 'material_transfers', 'material_counts', 'material_adjustments'):
+                if table not in ('alembic_version', 'stock_documents', 'inventory_transactions', 'operation_logs', 'material_transfers', 'material_counts', 'material_adjustments'):
                     cursor.execute(f"GRANT UPDATE, DELETE ON `{DATABASE}`.`{table}` TO '{APP_USER}'@'127.0.0.1'")
     print('隔离应用账号授权完成')
 

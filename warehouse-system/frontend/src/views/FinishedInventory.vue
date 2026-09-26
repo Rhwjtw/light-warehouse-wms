@@ -11,6 +11,7 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import TableSkeleton from '../components/ui/TableSkeleton.vue'
+import DocumentReversal from '../components/DocumentReversal.vue'
 
 const route = useRoute()
 const resource = computed(() => route.meta.resource)
@@ -22,7 +23,7 @@ const form = reactive({ product_id: null, quantity: '', business_date: today(), 
 const products = ref([]), selected = ref(null), selecting = ref(false), saving = ref(false)
 const error = ref(''), success = ref(null), rows = ref([]), loading = ref(false), total = ref(0)
 const q = ref(''), page = ref(1), pageSize = ref(20), stockTab = ref('balance')
-const detail = ref(null), detailOpen = ref(false)
+const detailOpen = ref(false), detailId = ref(null)
 let listGeneration = 0, optionGeneration = 0, selectionGeneration = 0, lastPayload = '', requestId = ''
 // 三类序号分别隔离列表、下拉选项和库存详情的异步响应，防止旧请求覆盖新选择。
 const endpoint = computed(() => isStock.value && stockTab.value === 'ledger' ? 'finished-transactions' : resource.value)
@@ -36,15 +37,11 @@ const columns = computed(() => balanceView.value ? [
   ['business_date', '业务日期'], ['product_name', '成品名称'], ['business_type', '业务类型'], ['quantity', '数量'], ['unit', '单位'],
   ['change_quantity', '变动量'], ['after_quantity', '变动后库存'], ['reference_no', '关联单据'], ['operator_name', '操作人员'],
 ])
-const detailFields = [['document_no', '库存单据号'], ['created_at', '记账时间'], ['business_date', '业务日期'],
-  ['product_code', '成品编码'], ['product_name', '成品名称'], ['kind', '操作类型'], ['business_type', '业务类型'],
-  ['quantity', '数量'], ['unit', '单位'], ['before_quantity', '变动前'], ['change_quantity', '变动量'], ['after_quantity', '变动后'],
-  ['reference_no', '关联单据'], ['operator_name', '操作人员'], ['notes', '备注']]
 function display(row, key) {
   if (row[key] == null || row[key] === '') return '—'
   if (key.endsWith('_at')) return new Date(row[key]).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false })
-  if (key === 'kind') return row[key] === 'finished_receipt' ? '成品入库' : '成品出库'
-  if (key === 'business_type') return row[key] === 'production' ? '生产入库' : row.kind === 'finished_receipt' ? '普通入库' : '普通出库'
+  if (key === 'kind') return row[key] === 'finished_receipt' ? '成品入库' : row[key] === 'reversal' ? '冲销' : '成品出库'
+  if (key === 'business_type') return row.kind === 'reversal' ? '普通出库冲销' : row[key] === 'production' ? '生产入库' : row.kind === 'finished_receipt' ? '普通入库' : '普通出库'
   return row[key]
 }
 function isQuantityColumn(key) { return ['quantity', 'change_quantity', 'after_quantity', 'before_quantity'].includes(key) }
@@ -74,13 +71,7 @@ async function load() {
   } catch (e) { if (ticket === listGeneration) { error.value = e.message; rows.value = []; total.value = 0 } }
   finally { if (ticket === listGeneration) loading.value = false }
 }
-async function openDetail(row) {
-  try {
-    const path = row.kind === 'finished_receipt' ? 'finished-receipts' : 'finished-outbounds'
-    const result = await api.get(`/${path}/${row.id}`)
-    detail.value = result.data; detailOpen.value = true
-  } catch (e) { error.value = e.message }
-}
+function openDetail(row) { detailId.value = row.id; detailOpen.value = true }
 async function submit() {
   if (saving.value || selecting.value) return
   error.value = ''; success.value = null
@@ -144,11 +135,11 @@ watch(resource, async () => {
     <el-tabs v-if="isStock" v-model="stockTab" @tab-change="page=1; load()"><el-tab-pane label="当前库存" name="balance" /><el-tab-pane label="成品库存流水" name="ledger" /></el-tabs>
     <FilterBar><el-form inline @submit.prevent="page=1; load()"><el-form-item label="搜索"><el-input v-model="q" maxlength="120" clearable placeholder="成品名称或编码" @clear="page=1; load()" /></el-form-item><el-form-item><el-button :icon="Search" type="primary" native-type="submit">查询</el-button></el-form-item></el-form></FilterBar>
     <TableSkeleton v-if="loading && !rows.length" />
-    <el-table v-else v-loading="loading" :data="rows" stripe row-key="id"><el-table-column v-for="[key,label] in columns" :key="key" :label="label" :min-width="key.endsWith('_at') ? 175 : 120" show-overflow-tooltip><template #default="{row}"><span :class="{ 'data-value': isQuantityColumn(key) }">{{ display(row,key) }}</span></template></el-table-column><el-table-column v-if="!balanceView" label="详情" fixed="right" width="88"><template #default="{row}"><el-button :icon="View" type="primary" link @click="openDetail(row)">查看</el-button></template></el-table-column><template #empty><EmptyState title="暂无成品库存记录" description="当前查询条件下没有匹配的数据。" /></template></el-table>
+    <el-table v-else v-loading="loading" :data="rows" stripe row-key="id"><el-table-column v-for="[key,label] in columns" :key="key" :label="label" :min-width="key.endsWith('_at') ? 175 : 120" show-overflow-tooltip><template #default="{row}"><span :class="{ 'data-value': isQuantityColumn(key) }">{{ display(row,key) }}</span></template></el-table-column><el-table-column v-if="!balanceView" label="单据状态" width="95"><template #default="{row}"><el-tag v-if="row.reversed_by_document_id" type="danger">已冲销</el-tag><el-tag v-else-if="row.kind === 'reversal'" type="info">冲销单</el-tag><span v-else>正常</span></template></el-table-column><el-table-column v-if="!balanceView" label="详情" fixed="right" width="88"><template #default="{row}"><el-button :icon="View" type="primary" link @click="openDetail(row)">查看</el-button></template></el-table-column><template #empty><EmptyState title="暂无成品库存记录" description="当前查询条件下没有匹配的数据。" /></template></el-table>
     <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[10,20,50,100]" layout="total, sizes, prev, pager, next" class="pagination" @current-change="load" @size-change="page=1; load()" />
   </DataPanel>
 
-  <el-dialog v-model="detailOpen" title="成品库存单据详情" width="650px"><el-descriptions v-if="detail" :column="1" border><el-descriptions-item v-for="[key,label] in detailFields" :key="key" :label="label">{{ display(detail,key) }}</el-descriptions-item></el-descriptions></el-dialog>
+  <DocumentReversal v-model="detailOpen" :document-id="detailId" @changed="load(); selectProduct()" />
 </template>
 
 <style scoped>
