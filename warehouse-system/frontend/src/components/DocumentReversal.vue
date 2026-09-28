@@ -11,7 +11,7 @@ const open = computed({ get: () => props.modelValue, set: value => emit('update:
 const detail = ref(null), preview = ref(null), reason = ref(''), error = ref(''), loading = ref(false), saving = ref(false)
 const canReverse = computed(() => canOperate(auth.user?.role, 'stock.reversal.write'))
 let generation = 0, requestId = '', requestReason = ''
-const labels = { material_outbound: '原材料普通出库', finished_outbound: '成品普通出库', reversal: '冲销单' }
+const labels = { material_receipt: '原材料入库', putaway: '上架', transfer: '移库', finished_receipt: '成品入库', adjustment: '库存调整', material_outbound: '原材料普通出库', finished_outbound: '成品普通出库', reversal: '冲销单' }
 const stateLabel = computed(() => detail.value?.status === 'reversed' ? '已冲销' : detail.value?.status === 'reversal' ? '冲销单' : '正常')
 function time(value) { return value ? new Date(value).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false }) : '—' }
 async function load(id) {
@@ -22,7 +22,7 @@ async function load(id) {
     const result = await api.get(`/stock-documents/${id}`)
     if (ticket !== generation) return
     detail.value = result.data
-    if (result.data.status === 'normal' && ['material_outbound', 'finished_outbound'].includes(result.data.kind)) {
+    if (result.data.status === 'normal' && ['material_outbound', 'finished_outbound', 'material_receipt', 'putaway', 'transfer', 'finished_receipt', 'adjustment'].includes(result.data.kind)) {
       const next = await api.get(`/stock-documents/${id}/reversal-preview`)
       if (ticket === generation) preview.value = next.data
     }
@@ -73,9 +73,11 @@ async function execute() {
         </el-descriptions>
         <p v-if="detail.original">原单：<el-button link type="primary" @click="load(detail.original.id)">{{ detail.original.document_no }}</el-button></p>
         <p v-if="detail.reversal">冲销单：<el-button link type="primary" @click="load(detail.reversal.id)">{{ detail.reversal.document_no }}</el-button> · {{ detail.reversal.reason }} · {{ time(detail.reversal.created_at) }}</p>
+        <el-alert v-if="detail.inventory_scope === 'aggregate'" title="成品汇总库存数量冲销，不识别具体实物批次" type="info" :closable="false" />
         <h4>库存流水</h4>
         <el-table :data="detail.transactions" border size="small">
           <el-table-column prop="item_name" label="物料/成品" min-width="130" />
+          <el-table-column prop="unit" label="单位" width="65" />
           <el-table-column prop="batch_no" label="原料批次" min-width="110" />
           <el-table-column prop="source_location_name" label="原库位" min-width="100" />
           <el-table-column prop="target_location_name" label="目标库位" min-width="100" />
@@ -87,6 +89,7 @@ async function execute() {
           <h4>冲销预览</h4>
           <el-alert :title="preview.message" :type="preview.eligible ? 'info' : 'warning'" :closable="false" show-icon />
           <p v-for="row in preview.changes" :key="row.batch_id">{{ row.item_name }} {{ row.batch_no || '' }} {{ row.location_name || '' }}：{{ row.before_quantity }} + {{ row.change_quantity }} = {{ row.after_quantity }} {{ row.unit }}</p>
+          <p v-if="preview.shelved_quantity_after != null">冲销后有效已上架数量：{{ preview.shelved_quantity_after }}</p>
           <el-form v-if="preview.eligible && canReverse" label-position="top" @submit.prevent="execute">
             <el-form-item label="冲销原因（必填）" required><el-input v-model="reason" type="textarea" :rows="2" maxlength="2000" show-word-limit placeholder="说明原单错误及修正依据" /></el-form-item>
             <el-button type="danger" :loading="saving" native-type="submit">作废 / 冲销</el-button>

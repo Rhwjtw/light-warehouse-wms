@@ -119,19 +119,37 @@ def _move(session, user, payload, kind):
         source_id = payload.source_batch_id
         target_location_id = payload.target_location_id
     material = _material_for_batch(session, source_id)
-    # All raw stock writers lock the material first. The source is then locked before the target.
+    # All raw stock writers lock the material first, then existing batch IDs in ascending order.
     replay = _existing(session, payload, fingerprint, (kind,), user)
     if replay:
         return replay
     movement = None
     if kind == 'putaway':
         movement = session.scalar(select(MaterialMovement).where(
-            MaterialMovement.id == payload.receipt_movement_id).with_for_update())
+            MaterialMovement.id == payload.receipt_movement_id).execution_options(populate_existing=True))
         receipt = session.get(StockDocument, movement.document_id) if movement else None
         if receipt is None or receipt.kind != 'material_receipt' or movement.shelved_quantity is None:
             raise HTTPException(422, '所选记录不是待上架入库')
+        if session.scalar(select(StockDocument.id).where(StockDocument.reverses_document_id == receipt.id)):
+            raise HTTPException(409, '原入库单已冲销，不能继续上架')
         source_id = movement.batch_id
-    source = session.scalar(select(MaterialBatch).where(MaterialBatch.id == source_id).with_for_update())
+    # Material mutex is already held. Lock existing source/target balances in PK order.
+    source_info = session.scalar(select(MaterialBatch).where(MaterialBatch.id == source_id)
+                                 .execution_options(populate_existing=True))
+    if source_info is None:
+        raise HTTPException(409, '原批次不存在')
+    target_id = session.scalar(select(MaterialBatch.id).where(
+        MaterialBatch.material_id == source_info.material_id, MaterialBatch.batch_no == source_info.batch_no,
+        MaterialBatch.supplier_id == source_info.supplier_id, MaterialBatch.location_id == target_location_id,
+        MaterialBatch.stock_status == 'shelved'))
+    lock_ids = sorted({source_id, target_id} - {None})
+    locked = {}
+    for batch_id in lock_ids:
+        batch = session.scalar(select(MaterialBatch).where(MaterialBatch.id == batch_id)
+                               .with_for_update().execution_options(populate_existing=True))
+        if batch is not None:
+            locked[batch.id] = batch
+    source = locked.get(source_id)
     if source is None or source.material_id != material.id:
         raise HTTPException(409, '原材料批次已变化，请刷新后重试')
     if source.unit != material.unit:

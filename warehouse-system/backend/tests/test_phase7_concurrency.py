@@ -14,7 +14,7 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.main import app
 from app.models import (User, Role, ProductionOrder, ProductionOrderMaterial, MaterialIssueRecord,
-                        FinishedReceipt, FinishedBatch, FinishedProduct, BomHeader, BomItem,
+                        FinishedReceipt, FinishedOutbound, MaterialAdjustment, MaterialCount, FinishedBatch, FinishedProduct, BomHeader, BomItem,
                         MaterialBatch, MaterialMovement, MaterialTransfer, RawMaterial, Supplier, Location,
                         InventoryTransaction, StockDocument, OperationLog)
 from test_phase6 import PASSWORD
@@ -58,6 +58,9 @@ def committed_production():
                 (InventoryTransaction, InventoryTransaction.document_id.in_(docs)),
                 (MaterialIssueRecord, MaterialIssueRecord.order_material_id.in_(materials)),
                 (MaterialTransfer, MaterialTransfer.document_id.in_(docs)),
+                (MaterialAdjustment, MaterialAdjustment.document_id.in_(docs)),
+                (MaterialCount, MaterialCount.document_id.in_(docs)),
+                (FinishedOutbound, FinishedOutbound.document_id.in_(docs)),
                 (MaterialMovement, MaterialMovement.document_id.in_(docs)),
                 (FinishedReceipt, FinishedReceipt.document_id.in_(docs)),
                 (OperationLog, OperationLog.user_id == user_id),

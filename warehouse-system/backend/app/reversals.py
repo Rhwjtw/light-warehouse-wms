@@ -1,4 +1,4 @@
-"""Read-only stock document details and first-batch outbound reversals."""
+"""Unified stock document details and first/second-batch whole-document reversals."""
 from fastapi import APIRouter, Query
 from sqlalchemy import or_, select
 from sqlalchemy.orm import aliased

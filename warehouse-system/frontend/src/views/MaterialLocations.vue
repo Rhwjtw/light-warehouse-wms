@@ -13,6 +13,7 @@ import DataPanel from '../components/ui/DataPanel.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
+import DocumentReversal from '../components/DocumentReversal.vue'
 import TableSkeleton from '../components/ui/TableSkeleton.vue'
 
 const route = useRoute()
@@ -24,13 +25,16 @@ const locations = ref([]), materials = ref([]), stockOptions = ref([])
 const filters = reactive({ q: '', location_id: null, material_id: null, batch_no: '' })
 const selected = ref(null), actionVisible = ref(false), actionType = ref(''), detail = ref(null), detailVisible = ref(false), detailPage = ref(1)
 const action = reactive({ source_batch_id: null, location_id: null, quantity: '', actual_quantity: '', change_quantity: '', reason: '', notes: '', requestKey: '', requestContent: '' })
+const historyMode = ref(false)
+const documentOpen = ref(false), documentId = ref(null)
+function showDocument(id) { documentId.value = id; documentOpen.value = true }
 let generation = 0
 
 function dateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false }) : '—' }
 function positive(value) { try { return quantityUnits(value) > 0n } catch { return false } }
 function nonnegative(value) { try { return quantityUnits(value) >= 0n } catch { return false } }
 function statusText(value) { return ({ pending: '待上架', partial: '部分上架', shelved: '已上架' })[value] || value }
-function kindText(value) { return ({ material_receipt: '原材料入库', material_outbound: '原材料出库', putaway: '上架', transfer: '移库', issue: '车间领料', supplement: '补料', return: '退料', count_gain: '盘盈', count_loss: '盘亏', adjustment: '库存调整' })[value] || value }
+function kindText(value) { return ({ material_receipt: '原材料入库', material_outbound: '原材料出库', putaway: '上架', transfer: '移库', issue: '车间领料', supplement: '补料', return: '退料', count_gain: '盘盈', count_loss: '盘亏', adjustment: '库存调整', reversal: '冲销' })[value] || value }
 function formatted(value, unit) { return `${value} ${unit || ''}` }
 
 async function loadOptions() {
@@ -54,7 +58,11 @@ async function load() {
   try {
     const common = { page: page.value, page_size: pageSize.value }
     let path, params
-    if (mode.value === 'material-putaways') {
+    if (mode.value === 'material-putaways' && historyMode.value) {
+      path = '/material-transfers'; params = { ...common, kind: 'putaway' }
+    } else if (mode.value === 'material-counts' && historyMode.value) {
+      path = '/material-transactions'; params = { ...common, kind: 'adjustment' }
+    } else if (mode.value === 'material-putaways') {
       path = '/material-receipts'; params = { ...common, status: 'open', q: filters.q }
     } else if (mode.value === 'material-location-stock') {
       path = '/material-location-stock'; params = { ...common, location_id: filters.location_id || undefined,
@@ -138,7 +146,7 @@ async function loadDetailLedger() {
   catch (e) { error.value = e.message }
 }
 watch(mode, async () => {
-  generation++; page.value = 1; rows.value = []; total.value = 0; error.value = ''
+  generation++; historyMode.value = false; page.value = 1; rows.value = []; total.value = 0; error.value = ''
   Object.assign(filters, { q: '', location_id: null, material_id: null, batch_no: '' })
   await Promise.all([load(), loadOptions()])
 }, { immediate: true })
@@ -159,19 +167,23 @@ watch(mode, async () => {
   </DataPanel>
   <el-alert v-if="!canWrite && mode !== 'material-location-stock'" title="当前账号仅有查看权限。" type="info" :closable="false" class="location-feedback" />
 
-  <DataPanel :title="mode === 'material-putaways' ? '待上架入库单' : mode === 'material-location-stock' ? '库位库存' : mode === 'material-transfers' ? '移库记录' : '盘点记录'">
-    <FilterBar v-if="mode === 'material-putaways'"><el-form inline @submit.prevent="search"><el-form-item label="搜索"><el-input v-model="filters.q" placeholder="原料、批号或入库单号" clearable @clear="search" /></el-form-item><el-form-item><el-button type="primary" :icon="Search" native-type="submit">查询</el-button></el-form-item></el-form></FilterBar>
+  <DataPanel :title="mode === 'material-putaways' ? (historyMode ? '上架历史' : '待上架入库单') : mode === 'material-location-stock' ? '库位库存' : mode === 'material-transfers' ? '移库记录' : (historyMode ? '库存调整记录' : '盘点记录')">
+    <div v-if="['material-putaways', 'material-counts'].includes(mode)" style="margin-bottom: 16px"><el-button :type="!historyMode ? 'primary' : ''" @click="historyMode = false; search()">{{ mode === 'material-putaways' ? '待上架' : '盘点记录' }}</el-button><el-button :type="historyMode ? 'primary' : ''" @click="historyMode = true; search()">{{ mode === 'material-putaways' ? '上架历史' : '库存调整记录' }}</el-button></div>
+    <FilterBar v-if="mode === 'material-putaways' && !historyMode"><el-form inline @submit.prevent="search"><el-form-item label="搜索"><el-input v-model="filters.q" placeholder="原料、批号或入库单号" clearable @clear="search" /></el-form-item><el-form-item><el-button type="primary" :icon="Search" native-type="submit">查询</el-button></el-form-item></el-form></FilterBar>
     <FilterBar v-if="mode === 'material-location-stock'"><el-form inline @submit.prevent="search"><el-form-item label="库位"><el-select v-model="filters.location_id" clearable filterable placeholder="全部库位" @change="search"><el-option v-for="item in locations" :key="item.id" :value="item.id" :label="item.name" /></el-select></el-form-item><el-form-item label="原材料"><el-select v-model="filters.material_id" clearable filterable placeholder="全部原材料" @change="search"><el-option v-for="item in materials" :key="item.id" :value="item.id" :label="item.name" /></el-select></el-form-item><el-form-item label="批号"><el-input v-model="filters.batch_no" clearable placeholder="输入批号" @clear="search" /></el-form-item><el-form-item><el-button type="primary" :icon="Search" native-type="submit">查询</el-button></el-form-item></el-form></FilterBar>
     <TableSkeleton v-if="loading && !rows.length" />
-    <el-table v-else-if="mode === 'material-putaways'" :data="rows" v-loading="loading" stripe row-key="id">
-      <el-table-column prop="document_no" label="入库单" min-width="190" /><el-table-column prop="material_name" label="原材料" min-width="145" /><el-table-column prop="batch_no" label="批号" min-width="130" /><el-table-column prop="supplier_name" label="供应商" min-width="130" /><el-table-column label="入库 / 已上架 / 待上架" min-width="220"><template #default="{row}">{{ row.received_quantity }} / {{ row.shelved_quantity }} / <strong>{{ row.pending_quantity }} {{ row.unit }}</strong></template></el-table-column><el-table-column label="状态" width="110"><template #default="{row}"><StatusBadge :tone="row.status === 'partial' ? 'warning' : 'info'" :label="statusText(row.status)" /></template></el-table-column><el-table-column label="操作" width="100"><template #default="{row}"><el-button v-if="canWrite" link type="primary" @click="openAction('putaway',row)">上架</el-button></template></el-table-column>
+    <el-table v-else-if="mode === 'material-putaways' && !historyMode" :data="rows" v-loading="loading" stripe row-key="id">
+      <el-table-column prop="document_no" label="入库单" min-width="190" /><el-table-column prop="material_name" label="原材料" min-width="145" /><el-table-column prop="batch_no" label="批号" min-width="130" /><el-table-column prop="supplier_name" label="供应商" min-width="130" /><el-table-column label="入库 / 已上架 / 待上架" min-width="220"><template #default="{row}">{{ row.received_quantity }} / {{ row.shelved_quantity }} / <strong>{{ row.pending_quantity }} {{ row.unit }}</strong></template></el-table-column><el-table-column label="状态" width="110"><template #default="{row}"><StatusBadge :tone="row.status === 'partial' ? 'warning' : 'info'" :label="statusText(row.status)" /></template></el-table-column><el-table-column label="操作" width="150"><template #default="{row}"><el-button link type="primary" @click="showDocument(row.id)">详情</el-button><el-button v-if="canWrite" link type="primary" @click="openAction('putaway',row)">上架</el-button></template></el-table-column>
       <template #empty><EmptyState title="暂无待上架入库单" description="原材料入库后会在这里显示待上架数量。" /></template>
     </el-table>
     <el-table v-else-if="mode === 'material-location-stock'" :data="rows" v-loading="loading" stripe row-key="id">
       <el-table-column prop="location_name" label="库位名称" min-width="145" /><el-table-column prop="material_name" label="原材料" min-width="145" /><el-table-column prop="material_code" label="原料编码" min-width="120" /><el-table-column prop="batch_no" label="批号" min-width="130" /><el-table-column label="当前数量" min-width="130"><template #default="{row}"><strong>{{ formatted(row.remaining_quantity,row.unit) }}</strong></template></el-table-column><el-table-column prop="production_date" label="生产日期" min-width="125" /><el-table-column prop="expiry_date" label="有效期" min-width="125" /><el-table-column label="到期状态" width="105"><template #default="{row}"><StatusBadge :tone="row.expired ? 'danger' : 'success'" :label="row.expired ? '已过期' : '未过期'" /></template></el-table-column><el-table-column label="操作" width="170"><template #default="{row}"><el-button link type="primary" @click="showDetail(row)">详情 / 流水</el-button><el-button v-if="canWrite" link type="warning" @click="openAction('transfer',row)">移库</el-button><el-button v-if="canWrite" link type="danger" @click="openAction('count',row)">盘点</el-button></template></el-table-column>
       <template #empty><EmptyState title="暂无库位库存" description="可调整库位、原材料或批号筛选。" /></template>
     </el-table>
-    <el-table v-else-if="mode === 'material-transfers'" :data="rows" v-loading="loading" stripe row-key="id"><el-table-column label="时间" min-width="175"><template #default="{row}">{{ dateTime(row.created_at) }}</template></el-table-column><el-table-column prop="document_no" label="移库单" min-width="185" /><el-table-column prop="material_name" label="原材料" min-width="140" /><el-table-column prop="batch_no" label="批号" min-width="130" /><el-table-column prop="source_location_name" label="原库位" min-width="130" /><el-table-column prop="target_location_name" label="目标库位" min-width="130" /><el-table-column label="数量" min-width="120"><template #default="{row}">{{ formatted(row.quantity,row.unit) }}</template></el-table-column><el-table-column prop="operator_name" label="操作人" min-width="110" /><template #empty><EmptyState title="暂无移库记录" /></template></el-table>
+    <el-table v-else-if="mode === 'material-transfers' || mode === 'material-putaways' && historyMode" :data="rows" v-loading="loading" stripe row-key="id"><el-table-column label="时间" min-width="175"><template #default="{row}">{{ dateTime(row.created_at) }}</template></el-table-column><el-table-column prop="document_no" :label="mode === 'material-putaways' ? '上架单' : '移库单'" min-width="185" /><el-table-column prop="material_name" label="原材料" min-width="140" /><el-table-column prop="batch_no" label="批号" min-width="130" /><el-table-column prop="source_location_name" label="原库位" min-width="130" /><el-table-column prop="target_location_name" label="目标库位" min-width="130" /><el-table-column label="数量" min-width="120"><template #default="{row}">{{ formatted(row.quantity,row.unit) }}</template></el-table-column><el-table-column prop="operator_name" label="操作人" min-width="110" /><el-table-column label="单据状态" width="100"><template #default="{row}">{{ row.reversed_by_document_id ? '已冲销' : '正常' }}</template></el-table-column><el-table-column label="详情" width="90"><template #default="{row}"><el-button link type="primary" @click="showDocument(row.document_id)">查看</el-button></template></el-table-column><template #empty><EmptyState title="暂无记录" /></template></el-table>
+    <el-table v-else-if="mode === 'material-counts' && historyMode" :data="rows" v-loading="loading" stripe row-key="id">
+      <el-table-column prop="document_no" label="调整单号" min-width="190" /><el-table-column prop="material_name" label="原材料" min-width="130" /><el-table-column prop="batch_no" label="批号" min-width="110" /><el-table-column prop="before_quantity" label="调整前" /><el-table-column prop="change_quantity" label="变化量" /><el-table-column prop="after_quantity" label="调整后" /><el-table-column prop="unit" label="单位" width="70" /><el-table-column prop="notes" label="原调整原因" min-width="140" show-overflow-tooltip /><el-table-column label="状态"><template #default="{row}">{{ row.reversed_by_document_id ? '已冲销' : '正常' }}</template></el-table-column><el-table-column label="详情" width="90"><template #default="{row}"><el-button link type="primary" @click="showDocument(row.document_id)">查看</el-button></template></el-table-column>
+    </el-table>
     <el-table v-else :data="rows" v-loading="loading" stripe row-key="id"><el-table-column label="盘点时间" min-width="175"><template #default="{row}">{{ dateTime(row.counted_at) }}</template></el-table-column><el-table-column prop="counted_by_name" label="盘点人" min-width="100" /><el-table-column prop="location_name" label="库位" min-width="130" /><el-table-column prop="material_name" label="原材料" min-width="135" /><el-table-column prop="batch_no" label="批号" min-width="120" /><el-table-column label="账面 / 实盘 / 差异" min-width="230"><template #default="{row}">{{ row.book_quantity }} / {{ row.actual_quantity }} / <strong>{{ row.difference }} {{ row.unit }}</strong></template></el-table-column><el-table-column prop="reason" label="原因 / 备注" min-width="170" show-overflow-tooltip /><template #empty><EmptyState title="暂无盘点记录" /></template></el-table>
     <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[10,20,50,100]" layout="total, sizes, prev, pager, next" class="pagination" @current-change="load" @size-change="search" />
   </DataPanel>
@@ -192,10 +204,11 @@ watch(mode, async () => {
 
   <el-dialog v-model="detailVisible" title="库位库存详情与流水" width="min(1000px, 96vw)">
     <el-descriptions v-if="detail" :column="3" border><el-descriptions-item label="库位">{{ detail.location_name }}</el-descriptions-item><el-descriptions-item label="原材料">{{ detail.material_name }}</el-descriptions-item><el-descriptions-item label="批号">{{ detail.batch_no }}</el-descriptions-item><el-descriptions-item label="当前数量">{{ formatted(detail.remaining_quantity,detail.unit) }}</el-descriptions-item><el-descriptions-item label="生产日期">{{ detail.production_date }}</el-descriptions-item><el-descriptions-item label="有效期">{{ detail.expiry_date }}</el-descriptions-item></el-descriptions>
-    <el-table v-if="detail" :data="detail.transactions.items.slice(0,20)" stripe class="detail-ledger"><el-table-column label="时间" min-width="170"><template #default="{row}">{{ dateTime(row.created_at) }}</template></el-table-column><el-table-column prop="document_no" label="关联单据" min-width="175" /><el-table-column label="业务类型" min-width="125"><template #default="{row}">{{ kindText(row.kind) }}</template></el-table-column><el-table-column label="数量变化" min-width="115"><template #default="{row}">{{ formatted(row.change_quantity,row.unit) }}</template></el-table-column><el-table-column prop="source_location_name" label="原库位" min-width="120" /><el-table-column prop="target_location_name" label="目标库位" min-width="120" /><el-table-column prop="operator_name" label="操作人" min-width="105" /></el-table>
+    <el-table v-if="detail" :data="detail.transactions.items.slice(0,20)" stripe class="detail-ledger"><el-table-column label="时间" min-width="170"><template #default="{row}">{{ dateTime(row.created_at) }}</template></el-table-column><el-table-column prop="document_no" label="关联单据" min-width="175" /><el-table-column label="业务类型" min-width="125"><template #default="{row}">{{ kindText(row.kind) }}</template></el-table-column><el-table-column label="数量变化" min-width="115"><template #default="{row}">{{ formatted(row.change_quantity,row.unit) }}</template></el-table-column><el-table-column prop="source_location_name" label="原库位" min-width="120" /><el-table-column prop="target_location_name" label="目标库位" min-width="120" /><el-table-column prop="operator_name" label="操作人" min-width="105" /><el-table-column label="单据详情" width="95" fixed="right"><template #default="{row}"><el-button link type="primary" @click="showDocument(row.document_id)">查看</el-button></template></el-table-column></el-table>
     <el-pagination v-if="detail && detail.transactions.total > 20" v-model:current-page="detailPage" :total="detail.transactions.total" :page-size="20" layout="total, prev, pager, next" @current-change="loadDetailLedger" />
     <template #footer><el-button @click="detailVisible=false">关闭</el-button></template>
   </el-dialog>
+  <DocumentReversal v-model="documentOpen" :document-id="documentId" @changed="load(); detailVisible = false" />
 </template>
 
 <style scoped>

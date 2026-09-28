@@ -41,7 +41,7 @@ function display(row, key) {
   if (row[key] == null || row[key] === '') return '—'
   if (key.endsWith('_at')) return new Date(row[key]).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false })
   if (key === 'kind') return row[key] === 'finished_receipt' ? '成品入库' : row[key] === 'reversal' ? '冲销' : '成品出库'
-  if (key === 'business_type') return row.kind === 'reversal' ? '普通出库冲销' : row[key] === 'production' ? '生产入库' : row.kind === 'finished_receipt' ? '普通入库' : '普通出库'
+  if (key === 'business_type') return row.kind === 'reversal' ? '库存冲销' : row[key] === 'production' ? '生产入库' : row.kind === 'finished_receipt' ? '普通入库' : '普通出库'
   return row[key]
 }
 function isQuantityColumn(key) { return ['quantity', 'change_quantity', 'after_quantity', 'before_quantity'].includes(key) }

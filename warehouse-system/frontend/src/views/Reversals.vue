@@ -29,7 +29,7 @@ onMounted(load)
     <el-table :data="rows" v-loading="loading" stripe>
       <el-table-column prop="document_no" label="冲销单号" min-width="210" />
       <el-table-column prop="original_document_no_snapshot" label="原单号" min-width="210" />
-      <el-table-column prop="reverses_kind" label="原业务" min-width="125"><template #default="{ row }">{{ row.reverses_kind === 'material_outbound' ? '原料普通出库' : '成品普通出库' }}</template></el-table-column>
+      <el-table-column prop="reverses_kind" label="原业务" min-width="125"><template #default="{ row }">{{ ({ material_receipt: '待上架入库', putaway: '上架', transfer: '移库', finished_receipt: '成品普通入库', adjustment: '库存调整', material_outbound: '原料普通出库', finished_outbound: '成品普通出库' })[row.reverses_kind] || row.reverses_kind }}</template></el-table-column>
       <el-table-column prop="reversal_reason" label="冲销原因" min-width="200" show-overflow-tooltip />
       <el-table-column prop="operator_name" label="操作人" min-width="100" />
       <el-table-column prop="created_at" label="冲销时间" min-width="190"><template #default="{ row }">{{ time(row.created_at) }}</template></el-table-column>

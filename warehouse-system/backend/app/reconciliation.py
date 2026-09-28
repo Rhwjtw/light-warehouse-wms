@@ -13,6 +13,7 @@ from app.models import (FinishedBatch, FinishedOutbound, FinishedReceipt,
                         InventoryTransaction, MaterialAdjustment, MaterialBatch, MaterialCount, MaterialIssueRecord,
                         MaterialMovement, MaterialTransfer, OperationLog, ProductionOrder,
                         ProductionOrderMaterial, StockDocument)
+from app.reversal_rules import SUPPORTED_KINDS, MOVES, complete_inverse, downstream_blockers
 from app.settlement_service import loss_values
 from app.unit_conversion import convert_quantity
 
@@ -47,26 +48,10 @@ def reconcile(session):
                 problem('reversal', doc.id, 'ordinary document has reversal fields')
             continue
         original = documents.get(doc.reverses_document_id)
-        if (original is None or original.kind not in ('material_outbound', 'finished_outbound')
-                or doc.reverses_kind != original.kind
-                or doc.original_document_no_snapshot != original.document_no
-                or not doc.reversal_reason or not doc.reversal_reason.strip()):
-            problem('reversal', doc.id, 'missing, unsupported or inconsistent original document')
-            continue
-        reversals_by_original[original.id].append(doc)
-        source_rows = ledger_by_document[original.id]
-        reversed_rows = ledger_by_document[doc.id]
-        if len(source_rows) != 1 or len(reversed_rows) != 1:
-            problem('reversal', doc.id, 'outbound reversal must pair exactly one ledger row')
-            continue
-        source, reverse = source_rows[0], reversed_rows[0]
-        if (reverse.reverses_transaction_id != source.id or reverse.kind != 'reversal'
-                or reverse.material_batch_id != source.material_batch_id
-                or reverse.finished_batch_id != source.finished_batch_id
-                or reverse.unit != source.unit or reverse.change_quantity != -source.change_quantity
-                or reverse.source_location_id is not None
-                or reverse.target_location_id != source.source_location_id):
-            problem('reversal', doc.id, 'reverse ledger does not invert its original row')
+        if original is not None:
+            reversals_by_original[original.id].append(doc)
+        if not complete_inverse(original, doc, ledger_by_document):
+            problem('reversal', doc.id, 'missing, unsupported or incomplete inverse document/ledger')
     for original_id, rows in reversals_by_original.items():
         if len(rows) != 1:
             problem('reversal', original_id, 'original document reversed more than once')
@@ -121,17 +106,41 @@ def reconcile(session):
             sign = 1 if kind in ('material_receipt', 'return', 'finished_receipt') else -1
             expected[row.document_id, scope, row.batch_id, kind, sign * row.quantity] += 1
     putaway_totals = defaultdict(lambda: Decimal('0'))
+    transfers = {}
+    counts_history = list(session.scalars(select(MaterialCount)))
     for row in session.scalars(select(MaterialTransfer)):
         doc = documents.get(row.document_id)
+        transfers[row.document_id] = row
         if doc is None or doc.kind not in ('putaway', 'transfer'):
             problem('transfer', row.id, 'missing or wrong document')
             continue
+        source = session.get(MaterialBatch, row.source_batch_id)
+        target = session.get(MaterialBatch, row.target_batch_id)
+        if (source is None or target is None or source.id == target.id
+                or target.stock_status != 'shelved'
+                or any(getattr(source, field) != getattr(target, field) for field in
+                       ('material_id', 'supplier_id', 'batch_no', 'unit', 'production_date', 'expiry_date'))):
+            problem('transfer', row.id, 'source/target batch attributes differ')
+        else:
+            for entry in ledger_by_document[doc.id]:
+                if (entry.source_location_id != source.location_id
+                        or entry.target_location_id != target.location_id):
+                    problem('transfer', row.id, 'original ledger location direction differs')
+            receipt = session.get(MaterialMovement, row.receipt_movement_id) if row.receipt_movement_id else None
+            receipt_doc = documents.get(receipt.document_id) if receipt else None
+            if doc.kind == 'putaway' and (source.stock_status != 'pending' or not receipt
+                    or receipt.batch_id != source.id or not receipt_doc or receipt_doc.kind != 'material_receipt'):
+                problem('transfer', row.id, 'putaway receipt/pending source linkage differs')
+            if doc.kind == 'transfer' and (source.stock_status != 'shelved' or receipt is not None):
+                problem('transfer', row.id, 'transfer source/linkage differs')
         expected[row.document_id, 'material', row.source_batch_id, doc.kind, -row.quantity] += 1
         expected[row.document_id, 'material', row.target_batch_id, doc.kind, row.quantity] += 1
         if row.receipt_movement_id is not None:
             if doc.kind != 'putaway':
                 problem('transfer', row.id, 'receipt linkage on non-putaway')
-            putaway_totals[row.receipt_movement_id] += row.quantity
+            reversed_docs = reversals_by_original.get(doc.id, [])
+            if not any(complete_inverse(doc, inverse, ledger_by_document) for inverse in reversed_docs):
+                putaway_totals[row.receipt_movement_id] += row.quantity
     for row in session.scalars(select(MaterialMovement)):
         doc = documents.get(row.document_id)
         if doc and doc.kind == 'material_receipt':
@@ -140,7 +149,10 @@ def reconcile(session):
             else:
                 batch = session.get(MaterialBatch, row.batch_id)
                 if batch.stock_status == 'pending':
-                    if row.shelved_quantity != putaway_totals[row.id] or batch.remaining_quantity != row.quantity - row.shelved_quantity:
+                    cancelled = row.quantity if any(complete_inverse(doc, inverse, ledger_by_document)
+                        for inverse in reversals_by_original.get(doc.id, [])) else Decimal('0')
+                    if (row.shelved_quantity != putaway_totals[row.id]
+                            or batch.remaining_quantity != row.quantity - row.shelved_quantity - cancelled):
                         problem('receipt', row.id, 'pending/shelved quantities differ from putaway history')
                 elif row.shelved_quantity != row.quantity:
                     problem('receipt', row.id, 'legacy shelved receipt has pending quantity')
@@ -157,8 +169,41 @@ def reconcile(session):
             problem('adjustment', row.id, 'missing or inconsistent adjustment document')
         else:
             expected[row.document_id, 'material', row.batch_id, 'adjustment', row.change_quantity] += 1
+    audits = list(session.scalars(select(OperationLog).where(OperationLog.entity_type == 'stock_documents')))
     for original_id, rows in reversals_by_original.items():
+        original = documents[original_id]
         for reversal in rows:
+            audit_rows = [a for a in audits if a.entity_id == str(reversal.id) and a.action == 'reverse_stock_document']
+            if (len(audit_rows) != 1 or audit_rows[0].user_id != reversal.operator_id
+                    or not isinstance(audit_rows[0].details, dict)
+                    or audit_rows[0].details.get('original_document_id') != original.id
+                    or audit_rows[0].details.get('original_document_no') != original.document_no
+                    or audit_rows[0].details.get('original_kind') != original.kind
+                    or audit_rows[0].details.get('reason') != reversal.reversal_reason):
+                problem('reversal', reversal.id, 'missing or inconsistent reversal audit')
+            if original.kind == 'finished_receipt':
+                detail = session.scalar(select(FinishedReceipt).where(FinishedReceipt.document_id == original.id))
+                if original.business_type != 'normal' or detail is None or detail.production_order_id is not None:
+                    problem('reversal', reversal.id, 'production/invalid finished receipt reversal')
+            if original.kind in MOVES or original.kind == 'adjustment':
+                move = transfers.get(original.id)
+                source_id = move.source_batch_id if move else next((r.material_batch_id for r in ledger_by_document[original.id]), None)
+                target_id = move.target_batch_id if move else source_id
+                blocked = downstream_blockers(original, source_id, target_id, documents, ledger, counts_history,
+                                              before_id=reversal.id)
+                if blocked:
+                    problem('reversal', reversal.id, 'crossed effective downstream facts: ' + ','.join(str(d.id) for d in blocked))
+            if original.kind == 'material_receipt':
+                movement = session.scalar(select(MaterialMovement).where(MaterialMovement.document_id == original.id))
+                batch = session.get(MaterialBatch, movement.batch_id) if movement else None
+                if batch is None or batch.stock_status != 'pending':
+                    problem('reversal', reversal.id, 'only pending receipt can be reversed')
+                linked = [t for t in transfers.values() if movement and t.receipt_movement_id == movement.id]
+                for move in linked:
+                    inverse = reversals_by_original.get(move.document_id, [])
+                    if (move.document_id > reversal.id or not any(r.id < reversal.id and complete_inverse(
+                            documents[move.document_id], r, ledger_by_document) for r in inverse)):
+                        problem('reversal', reversal.id, 'receipt reversed before shelving was undone or shelving after cancellation')
             for source in ledger_by_document[original_id]:
                 scope = 'material' if source.material_batch_id is not None else 'finished'
                 batch_id = source.material_batch_id if scope == 'material' else source.finished_batch_id

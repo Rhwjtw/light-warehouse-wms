@@ -226,7 +226,7 @@ class StockDocument(Identity, Base):
         CheckConstraint("(kind <> 'reversal' AND reverses_document_id IS NULL AND reverses_kind IS NULL "
                         "AND original_document_no_snapshot IS NULL AND reversal_reason IS NULL) OR "
                         "(kind = 'reversal' AND reverses_document_id IS NOT NULL AND reverses_kind IS NOT NULL "
-                        "AND reverses_kind IN ('material_outbound','finished_outbound') "
+                        "AND reverses_kind IN ('material_outbound','finished_outbound','material_receipt','putaway','transfer','finished_receipt','adjustment') "
                         "AND original_document_no_snapshot IS NOT NULL "
                         "AND reversal_reason IS NOT NULL AND CHAR_LENGTH(TRIM(reversal_reason)) > 0)",
                         name='valid_reversal'),

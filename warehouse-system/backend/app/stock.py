@@ -56,7 +56,9 @@ def page_result(session, query, page, page_size):
 
 
 def receipt_query(q='', status=None):
-    pending = MaterialMovement.quantity - MaterialMovement.shelved_quantity
+    reversal = aliased(StockDocument)
+    reversed_id = select(reversal.id).where(reversal.reverses_document_id == StockDocument.id).correlate(StockDocument).scalar_subquery()
+    pending = case((reversed_id.is_not(None), 0), else_=MaterialMovement.quantity - MaterialMovement.shelved_quantity)
     query = select(StockDocument.id, StockDocument.document_no, StockDocument.created_at,
                    MaterialMovement.id.label('receipt_movement_id'), MaterialMovement.batch_id,
                    RawMaterial.id.label('material_id'), RawMaterial.code.label('material_code'),
@@ -65,7 +67,9 @@ def receipt_query(q='', status=None):
                    Supplier.name.label('supplier_name'), MaterialBatch.supplier_id,
                    MaterialMovement.quantity.label('received_quantity'),
                    MaterialMovement.shelved_quantity, pending.label('pending_quantity'),
-                   case((MaterialMovement.shelved_quantity == 0, 'pending'),
+                   reversed_id.label('reversed_by_document_id'),
+                   case((reversed_id.is_not(None), 'reversed'),
+                        (MaterialMovement.shelved_quantity == 0, 'pending'),
                         (MaterialMovement.shelved_quantity == MaterialMovement.quantity, 'shelved'),
                         else_='partial').label('status'))
     query = query.select_from(MaterialMovement).join(StockDocument, StockDocument.id == MaterialMovement.document_id)
@@ -79,17 +83,19 @@ def receipt_query(q='', status=None):
     if status == 'open':
         query = query.where(pending > 0)
     elif status == 'pending':
-        query = query.where(MaterialMovement.shelved_quantity == 0)
+        query = query.where(MaterialMovement.shelved_quantity == 0, reversed_id.is_(None))
     elif status == 'partial':
         query = query.where(MaterialMovement.shelved_quantity > 0, pending > 0)
     elif status == 'shelved':
-        query = query.where(pending == 0)
+        query = query.where(pending == 0, reversed_id.is_(None))
+    elif status == 'reversed':
+        query = query.where(reversed_id.is_not(None))
     return query
 
 
 @router.get('/material-receipts', response_model=Envelope)
 def receipts(user: UserDep, session: SessionDep, q: str = Query('', max_length=120),
-             status: str | None = Query(None, pattern='^(open|pending|partial|shelved)$'),
+             status: str | None = Query(None, pattern='^(open|pending|partial|shelved|reversed)$'),
              page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     return page_result(session, receipt_query(q, status).order_by(StockDocument.id.desc()), page, page_size)
 
@@ -100,9 +106,12 @@ def receipt_detail(identity: int, user: UserDep, session: SessionDep):
     receipt = session.execute(receipt_query().where(StockDocument.id == identity)).mappings().first()
     if receipt is None:
         raise HTTPException(404, '原材料入库单不存在')
-    allocations = session.execute(select(MaterialTransfer.id, MaterialTransfer.quantity,
+    reversal = aliased(StockDocument)
+    allocations = session.execute(select(MaterialTransfer.id, MaterialTransfer.document_id, MaterialTransfer.quantity,
+                                         reversal.id.label('reversed_by_document_id'),
                                          StockDocument.created_at, Location.name.label('location_name'))
                                   .join(StockDocument, StockDocument.id == MaterialTransfer.document_id)
+                                  .outerjoin(reversal, reversal.reverses_document_id == StockDocument.id)
                                   .join(MaterialBatch, MaterialBatch.id == MaterialTransfer.target_batch_id)
                                   .join(Location, Location.id == MaterialBatch.location_id)
                                   .where(MaterialTransfer.receipt_movement_id == receipt['receipt_movement_id'])
@@ -112,7 +121,8 @@ def receipt_detail(identity: int, user: UserDep, session: SessionDep):
     summary = {key: format(value, 'f') if isinstance(value, Decimal) else value.isoformat()
                if isinstance(value, (date, datetime)) else value for key, value in receipt.items()}
     return Envelope(data={**summary, 'allocations': [
-        {'id': row['id'], 'quantity': format(row['quantity'], 'f'),
+        {'id': row['id'], 'document_id': row['document_id'],
+         'reversed_by_document_id': row['reversed_by_document_id'], 'quantity': format(row['quantity'], 'f'),
          'created_at': row['created_at'].isoformat(), 'location_name': row['location_name']}
         for row in allocations]})
 
@@ -162,16 +172,19 @@ def counts(user: UserDep, session: SessionDep, batch_id: int | None = Query(None
 @router.get('/material-transfers', response_model=Envelope)
 def transfers(user: UserDep, session: SessionDep, kind: str | None = Query(None, pattern='^(putaway|transfer)$'),
               page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
+    reversal = aliased(StockDocument)
     source = aliased(MaterialBatch)
     target = aliased(MaterialBatch)
     source_location = aliased(Location)
     target_location = aliased(Location)
     query = select(MaterialTransfer.id, MaterialTransfer.document_id, MaterialTransfer.quantity,
                    StockDocument.kind, StockDocument.document_no, StockDocument.created_at,
+                   reversal.id.label('reversed_by_document_id'),
                    RawMaterial.name.label('material_name'), source.batch_no, source.unit,
                    source_location.name.label('source_location_name'),
                    target_location.name.label('target_location_name'), User.display_name.label('operator_name'))
     query = query.join(StockDocument, StockDocument.id == MaterialTransfer.document_id)
+    query = query.outerjoin(reversal, reversal.reverses_document_id == StockDocument.id)
     query = query.join(source, source.id == MaterialTransfer.source_batch_id)
     query = query.join(target, target.id == MaterialTransfer.target_batch_id)
     query = query.join(RawMaterial, RawMaterial.id == source.material_id)
