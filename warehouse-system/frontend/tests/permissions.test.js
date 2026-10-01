@@ -31,3 +31,11 @@ test('操作权限区分档案、库存、生产和领补退', () => {
 test('未知角色和未登录用户拒绝访问', () => {
   for (const role of [undefined,null,'','other']) assert.equal(canAccess(role,'orders'),false)
 })
+
+test('trace query does not grant stock writes to workshop or accounting roles', () => {
+  for (const role of ['admin','warehouse','workshop_director','workshop','accountant']) assert.equal(canAccess(role,'traceability'),true)
+  for (const role of ['workshop_director','workshop','accountant']) {
+    assert.equal(canOperate(role,'finished.inventory.write'),false)
+    assert.equal(canOperate(role,'stock.reversal.write'),false)
+  }
+})

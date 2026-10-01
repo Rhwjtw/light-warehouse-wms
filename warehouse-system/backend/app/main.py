@@ -16,7 +16,7 @@ from starlette.exceptions import HTTPException
 from app.config import get_settings
 from app.database import engine
 from app.schemas import Envelope
-from app import auth, bom, catalog, users, stock, finished, production, losses, overview, reversals
+from app import auth, bom, catalog, users, stock, finished, production, losses, overview, reversals, traceability
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from app.config import BACKEND_DIR
@@ -48,6 +48,7 @@ app.include_router(production.router)
 app.include_router(losses.router)
 app.include_router(overview.router)
 app.include_router(reversals.router)
+app.include_router(traceability.router)
 
 
 def error(status: int, code: str, message: str):

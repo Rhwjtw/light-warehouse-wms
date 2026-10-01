@@ -16,6 +16,7 @@ import FilterBar from '../components/ui/FilterBar.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import TableSkeleton from '../components/ui/TableSkeleton.vue'
+import DocumentReversal from '../components/DocumentReversal.vue'
 
 const registerVisible = ref(false), registering = ref(false), registeredQuantity = ref(''), registerError = ref('')
 function openRegister() { registeredQuantity.value = current.value.actual_quantity || ''; registerError.value = ''; registerVisible.value = true }
@@ -28,10 +29,15 @@ async function registerActual() {
 }
 const completeVisible = ref(false), completing = ref(false), settling = ref(false)
 const actualQuantity = ref(''), settlement = ref(null), settlementError = ref('')
+const finishedBatches = ref([]), materialDocumentOpen = ref(false), materialDocumentId = ref(null)
 function openComplete() {
   actualQuantity.value = current.value?.actual_quantity || ''; settlement.value = null; settlementError.value = ''; completeVisible.value = true
+  finishedBatches.value = [{ batch_no: current.value.order_no, quantity: actualQuantity.value, expiry_date: '' }]
 }
-watch(actualQuantity, () => { settlement.value = null })
+watch(actualQuantity, (quantity, previous) => {
+  settlement.value = null
+  if (finishedBatches.value.length === 1 && finishedBatches.value[0].quantity === previous) finishedBatches.value[0].quantity = quantity
+})
 async function previewSettlement() {
   settlement.value = null; settlementError.value = ''; settling.value = true
   const quantity = actualQuantity.value
@@ -47,7 +53,10 @@ async function finishProduction() {
   completing.value = true; settlementError.value = ''
   try {
     // 正式完成会由后端重新汇总领补退、重算损耗并一次性生产入库，不能只信页面预览。
-    current.value = (await api.post(`/production-orders/${current.value.id}/complete`, { actual_quantity: actualQuantity.value })).data
+    current.value = (await api.post(`/production-orders/${current.value.id}/complete`, {
+      actual_quantity: actualQuantity.value,
+      finished_batches: finishedBatches.value.map(b => ({ ...b, expiry_date: b.expiry_date || null })),
+    })).data
     completeVisible.value = false; ElMessage.success('生产已完成，成品已入库'); await load()
   } catch (e) { settlementError.value = e.message; settlement.value = null }
   finally { completing.value = false }
@@ -162,7 +171,7 @@ async function cancelOrder() {
 function returnCandidates(material) {
   // 前端按逐笔记录计算每批最多可退量；服务端仍会基于数据库事实再次校验上限。
   const map = new Map()
-  for (const record of current.value.material_records.filter(row => row.order_material_id === material.id)) {
+  for (const record of current.value.material_records.filter(row => row.order_material_id === material.id && !row.is_reversed)) {
     const existing = map.get(record.batch_id) || { batch_id: record.batch_id, batch_no: record.batch_no, location_name: record.location_name, remaining_quantity: '—', expiry_date: '原领料批次', max_return: '0' }
     existing.max_return = quantityText(quantityUnits(existing.max_return) + (record.kind === 'return' ? -1n : 1n) * quantityUnits(record.quantity))
     map.set(record.batch_id, existing)
@@ -217,6 +226,7 @@ async function submitAction() {
 }
 
 watch(() => route.meta.resource, () => { page.value = 1; load() })
+watch(() => route.query.order_id, id => { if (id && /^\d+$/.test(String(id))) openDetail({ id: Number(id) }) }, { immediate: true })
 onMounted(() => { load(); loadProducts() })
 </script>
 
@@ -303,6 +313,7 @@ onMounted(() => { load(); loadProducts() })
         </el-descriptions>
         <h3>物料操作记录</h3>
         <el-table :data="current.material_records" stripe>
+          <el-table-column label="单据/状态" min-width="200"><template #default="{row}"><el-button link type="primary" @click="materialDocumentId=row.document_id; materialDocumentOpen=true">{{ row.document_no }}</el-button><el-tag v-if="row.is_reversed" type="danger">已冲销</el-tag></template></el-table-column>
           <el-table-column label="时间" min-width="175"><template #default="{row}">{{ dateTime(row.created_at) }}</template></el-table-column>
           <el-table-column prop="document_no" label="单据号" min-width="190" />
           <el-table-column label="类型" width="110"><template #default="{row}">{{ kindNames[row.kind] }}</template></el-table-column>
@@ -322,11 +333,16 @@ onMounted(() => { load(); loadProducts() })
   <el-dialog v-model="completeVisible" title="完成生产" width="min(1280px, 95vw)" :close-on-click-modal="false" :close-on-press-escape="!completing" :show-close="!completing">
     <el-alert v-if="settlementError" :title="settlementError" type="error" show-icon class="dialog-feedback" />
     <el-form label-width="120px" :disabled="completing"><el-form-item label="实际完成数量" required><el-input v-model="actualQuantity" inputmode="decimal" placeholder="填写最终实际产量"><template #append>{{ current?.finished_product_unit }}</template></el-input></el-form-item></el-form>
+    <el-alert title="所有批次数量合计必须等于实际产量。完成后生产事实不可撤销。" type="info" :closable="false" />
+    <el-table :data="finishedBatches"><el-table-column label="成品批次号"><template #default="{row}"><el-input v-model="row.batch_no" maxlength="80" :disabled="completing" /></template></el-table-column><el-table-column label="批次数量"><template #default="{row}"><el-input v-model="row.quantity" inputmode="decimal" :disabled="completing" /></template></el-table-column><el-table-column label="到期日期（可选）"><template #default="{row}"><el-date-picker v-model="row.expiry_date" type="date" value-format="YYYY-MM-DD" :disabled="completing" /></template></el-table-column><el-table-column width="90"><template #default="{ $index }"><el-button :disabled="completing || finishedBatches.length === 1" @click="finishedBatches.splice($index,1)">移除</el-button></template></el-table-column></el-table>
+    <el-button :disabled="completing" @click="finishedBatches.push({batch_no:'',quantity:'',expiry_date:''})">增加成品批次</el-button>
     <el-button :loading="settling" :disabled="completing" @click="previewSettlement">预览结算</el-button>
     <TableSkeleton v-if="settling" :rows="3" />
     <template v-if="settlement"><el-alert class="settlement-notice" type="info" :closable="false" show-icon :title="`确认后成品入库 ${settlement.actual_quantity} ${settlement.finished_product_unit}，并冻结生产单。提交时系统会重新核对物料记录。`" /><SettlementTable :rows="settlement.materials" /></template>
     <template #footer><el-button :disabled="completing" @click="completeVisible=false">取消</el-button><el-button type="primary" :disabled="!settlement || settling" :loading="completing" @click="finishProduction">确认完成</el-button></template>
   </el-dialog>
+
+  <DocumentReversal v-model="materialDocumentOpen" :document-id="materialDocumentId" @changed="refreshDetail(); load()" />
 
   <el-dialog v-model="editVisible" title="编辑生产单信息" width="520px" :close-on-click-modal="false">
     <el-alert v-if="error" :title="error" type="error" show-icon class="dialog-feedback" />

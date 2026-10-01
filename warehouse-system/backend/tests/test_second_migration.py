@@ -2,7 +2,7 @@
 from alembic import command
 from alembic.config import Config
 import pytest
-from sqlalchemy import inspect, select, text
+from sqlalchemy import inspect, select, text, MetaData
 from app.database import SessionLocal, Base, engine
 from scripts.check_test_target import check_test_target
 from test_phase7_concurrency import committed_production  # noqa: F401
@@ -15,9 +15,11 @@ pytestmark=pytest.mark.mysql
 
 
 def history():
+    metadata = MetaData()
+    metadata.reflect(bind=engine)
     with engine.connect() as connection:
         return {name:list(connection.execute(select(table).order_by(*table.primary_key.columns)))
-                for name,table in Base.metadata.tables.items()}
+                for name,table in metadata.tables.items() if name != 'alembic_version'}
 
 
 def structure():
@@ -33,8 +35,6 @@ def version():
 def test_0012_history_upgrade_downgrade_and_guard(committed_production):
     check_test_target()
     config=Config('alembic.ini')
-    command.downgrade(config,'0012')
-    assert version()=='0012'
     try:
         inv=committed_inventory(committed_production)
         put=setup(inv,'putaway')
@@ -43,25 +43,30 @@ def test_0012_history_upgrade_downgrade_and_guard(committed_production):
         finished=setup(inv,'finished_receipt')
         finished_out=data(post(inv,'finished-outbounds',product_id=finished['product_id'],quantity='2',unit='盒'))
         data(reverse(inv[0],inv[1],finished_out['id']))
+        # Create facts through the current service before downgrading; the 0014 ORM
+        # must never be run against an older schema lacking its generated columns.
+        command.downgrade(config,'0012')
+        assert version()=='0012'
         before,shape=history(),structure()
         command.upgrade(config,'0013')
         assert version()=='0013' and before==history() and shape==structure()
-        command.current(config); command.heads(config); command.check(config)
+        command.current(config); command.heads(config)
         checks=inspect(engine).get_check_constraints('stock_documents')
         valid=next(row['sqltext'] for row in checks if row['name']=='ck_stock_documents_valid_reversal')
         for kind in ('material_receipt','putaway','transfer','finished_receipt','adjustment'):
             assert kind in valid
-        with SessionLocal() as session: assert reconcile(session)['problems']==[]
         # Without new-kind reversal history downgrade is lossless and permitted.
         command.downgrade(config,'0012')
         assert version()=='0012' and before==history()
-        command.upgrade(config,'0013')
+        command.upgrade(config,'head')
         data(reverse(inv[0],inv[1],finished['id']))
+        command.downgrade(config,'0013')
         after=history()
         with pytest.raises(RuntimeError,match='immutable facts'):
             command.downgrade(config,'0012')
         assert version()=='0013' and after==history()
-        command.check(config)
-        with SessionLocal() as session: assert reconcile(session)['problems']==[]
     finally:
         command.upgrade(config,'head')
+        # Schema drift is compared with current model metadata only at current head.
+        command.check(config)
+        with SessionLocal() as session: assert reconcile(session)['problems']==[]

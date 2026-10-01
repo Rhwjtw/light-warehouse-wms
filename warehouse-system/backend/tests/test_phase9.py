@@ -67,9 +67,11 @@ def test_v1_three_material_full_flow(context):
     for illegal in ({'planned_quantity': '1'}, {'bom_id': data['bom']['id']}):
         assert client.put(f"/api/production-orders/{order['id']}", headers=headers['admin'], json=illegal).status_code == 422
     assert detail(data) == frozen
+    finished_batch = client.get(f"/api/finished-stock/{data['product']['id']}/batches", headers=headers['warehouse']).json()['data'][0]
     assert client.post('/api/finished-outbounds', headers=headers['warehouse'], json={
         'request_id': uuid4().hex, 'product_id': data['product']['id'], 'quantity': '10',
-        'unit': '盒', 'business_date': str(business_today())}).status_code == 200
+        'unit': '盒', 'business_date': str(business_today()),
+        'allocations': [{'batch_id': finished_batch['id'], 'quantity': '10'}]}).status_code == 200
     with Session(bind=context[2]) as session:
         assert [session.get(MaterialBatch, i).remaining_quantity for i in data['batches']] == [Decimal('0'), Decimal('12.3'), Decimal('5'), Decimal('3')]
         report = reconcile(session)

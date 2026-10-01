@@ -24,6 +24,7 @@ const products = ref([]), selected = ref(null), selecting = ref(false), saving =
 const error = ref(''), success = ref(null), rows = ref([]), loading = ref(false), total = ref(0)
 const q = ref(''), page = ref(1), pageSize = ref(20), stockTab = ref('balance')
 const detailOpen = ref(false), detailId = ref(null)
+const batchRows = ref([]), batchOpen = ref(false)
 let listGeneration = 0, optionGeneration = 0, selectionGeneration = 0, lastPayload = '', requestId = ''
 // 三类序号分别隔离列表、下拉选项和库存详情的异步响应，防止旧请求覆盖新选择。
 const endpoint = computed(() => isStock.value && stockTab.value === 'ledger' ? 'finished-transactions' : resource.value)
@@ -34,10 +35,11 @@ const columns = computed(() => balanceView.value ? [
   ['code', '成品编码'], ['name', '成品名称'], ['unit', '单位'], ['quantity', '当前库存'],
   ['last_receipt_at', '最近入库时间'], ['last_outbound_at', '最近出库时间'],
 ] : [
-  ['business_date', '业务日期'], ['product_name', '成品名称'], ['business_type', '业务类型'], ['quantity', '数量'], ['unit', '单位'],
+  ['business_date', '业务日期'], ['product_name', '成品名称'], ['batch_no', '批次/库存归属'], ['business_type', '业务类型'], ['quantity', '数量'], ['unit', '单位'],
   ['change_quantity', '变动量'], ['after_quantity', '变动后库存'], ['reference_no', '关联单据'], ['operator_name', '操作人员'],
 ])
 function display(row, key) {
+  if (key === 'batch_no') return row.stock_scope === 'aggregate' ? '历史无批次归属库存' : row.batch_no || '历史归属无法确定'
   if (row[key] == null || row[key] === '') return '—'
   if (key.endsWith('_at')) return new Date(row[key]).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false })
   if (key === 'kind') return row[key] === 'finished_receipt' ? '成品入库' : row[key] === 'reversal' ? '冲销' : '成品出库'
@@ -54,11 +56,12 @@ async function searchProducts(query = '') {
 }
 async function selectProduct() {
   const ticket = ++selectionGeneration
-  selected.value = null; selecting.value = true
+  selected.value = null; batchRows.value = []; selecting.value = true
   try {
     if (!form.product_id) return
     const result = await api.get('/finished-stock/' + form.product_id)
-    if (ticket === selectionGeneration) selected.value = result.data
+    const stock = (await api.get(`/finished-stock/${form.product_id}/batches`)).data
+    if (ticket === selectionGeneration) { selected.value = result.data; batchRows.value = stock.map(b => ({ ...b, outbound_quantity: '' })) }
   } catch (e) { if (ticket === selectionGeneration) error.value = e.message }
   finally { if (ticket === selectionGeneration) selecting.value = false }
 }
@@ -72,6 +75,10 @@ async function load() {
   finally { if (ticket === listGeneration) loading.value = false }
 }
 function openDetail(row) { detailId.value = row.id; detailOpen.value = true }
+async function openBatches(row) {
+  try { batchRows.value = (await api.get(`/finished-stock/${row.id}/batches`)).data; batchOpen.value = true }
+  catch (e) { error.value = e.message }
+}
 async function submit() {
   if (saving.value || selecting.value) return
   error.value = ''; success.value = null
@@ -79,6 +86,15 @@ async function submit() {
     error.value = '请选择成品和业务日期，数量必须大于零且最多六位小数'; return
   }
   const payload = { ...form, unit: selected.value.unit, reference_no: form.reference_no.trim() || null, notes: form.notes.trim() || null }
+  if (!isReceipt.value) {
+    const entered = batchRows.value.filter(b => String(b.outbound_quantity || '').trim())
+    if (entered.some(b => !/^\d{1,14}(\.\d{1,6})?$/.test(b.outbound_quantity) || !/[1-9]/.test(b.outbound_quantity))) {
+      error.value = '各批次出库量必须大于零且最多六位小数，不能跳过无效输入'; return
+    }
+    payload.allocations = entered
+      .map(b => ({ batch_id: b.id, quantity: b.outbound_quantity }))
+    if (!payload.allocations.length) { error.value = '请明确选择真实批次或历史无批次库存，并填写各批次出库量'; return }
+  }
   // 成品单位始终取档案查询结果，页面不允许自行输入或猜测“盒”等固定单位。
   const signature = JSON.stringify(payload)
   // 同内容连接中断重试沿用 requestId，后端幂等校验确保库存至多变化一次。
@@ -125,6 +141,8 @@ watch(resource, async () => {
       <el-row :gutter="20"><el-col :span="12"><el-form-item :label="isReceipt ? '入库类型' : '出库类型'"><el-select v-model="form.business_type"><el-option value="normal" :label="isReceipt ? '普通入库' : '普通出库'" /><el-option v-if="isReceipt" value="production" label="生产入库（请从生产单完成）" disabled /></el-select></el-form-item></el-col>
         <el-col :span="12"><el-form-item label="关联单据"><el-input v-model="form.reference_no" maxlength="120" placeholder="可选，填写外部单据编号" /></el-form-item></el-col></el-row>
       <el-form-item label="备注"><el-input v-model="form.notes" maxlength="2000" type="textarea" :rows="2" /></el-form-item>
+      <el-alert v-if="isReceipt" title="普通入库继续计入无批次归属库存；真实生产批次请从生产单完成创建。" type="info" :closable="false" />
+      <el-table v-if="!isReceipt && selected" :data="batchRows"><el-table-column prop="label" label="批次/库存归属" min-width="180" /><el-table-column prop="quantity" label="批次当前库存" /><el-table-column label="本次出库量"><template #default="{row}"><el-input v-model="row.outbound_quantity" inputmode="decimal" placeholder="不出库留空" /></template></el-table-column></el-table>
       <el-form-item><el-button type="primary" size="large" native-type="submit" :loading="saving" :disabled="selecting || !selected">{{ isReceipt ? '确认入库' : '确认出库' }}</el-button></el-form-item>
     </el-form>
   </DataPanel>
@@ -135,11 +153,13 @@ watch(resource, async () => {
     <el-tabs v-if="isStock" v-model="stockTab" @tab-change="page=1; load()"><el-tab-pane label="当前库存" name="balance" /><el-tab-pane label="成品库存流水" name="ledger" /></el-tabs>
     <FilterBar><el-form inline @submit.prevent="page=1; load()"><el-form-item label="搜索"><el-input v-model="q" maxlength="120" clearable placeholder="成品名称或编码" @clear="page=1; load()" /></el-form-item><el-form-item><el-button :icon="Search" type="primary" native-type="submit">查询</el-button></el-form-item></el-form></FilterBar>
     <TableSkeleton v-if="loading && !rows.length" />
-    <el-table v-else v-loading="loading" :data="rows" stripe row-key="id"><el-table-column v-for="[key,label] in columns" :key="key" :label="label" :min-width="key.endsWith('_at') ? 175 : 120" show-overflow-tooltip><template #default="{row}"><span :class="{ 'data-value': isQuantityColumn(key) }">{{ display(row,key) }}</span></template></el-table-column><el-table-column v-if="!balanceView" label="单据状态" width="95"><template #default="{row}"><el-tag v-if="row.reversed_by_document_id" type="danger">已冲销</el-tag><el-tag v-else-if="row.kind === 'reversal'" type="info">冲销单</el-tag><span v-else>正常</span></template></el-table-column><el-table-column v-if="!balanceView" label="详情" fixed="right" width="88"><template #default="{row}"><el-button :icon="View" type="primary" link @click="openDetail(row)">查看</el-button></template></el-table-column><template #empty><EmptyState title="暂无成品库存记录" description="当前查询条件下没有匹配的数据。" /></template></el-table>
+    <el-table v-else v-loading="loading" :data="rows" stripe :row-key="row => row.transaction_id || row.id"><el-table-column v-for="[key,label] in columns" :key="key" :label="label" :min-width="key.endsWith('_at') ? 175 : 120" show-overflow-tooltip><template #default="{row}"><span :class="{ 'data-value': isQuantityColumn(key) }">{{ display(row,key) }}</span></template></el-table-column><el-table-column v-if="!balanceView" label="单据状态" width="95"><template #default="{row}"><el-tag v-if="row.reversed_by_document_id" type="danger">已冲销</el-tag><el-tag v-else-if="row.kind === 'reversal'" type="info">冲销单</el-tag><span v-else>正常</span></template></el-table-column><el-table-column v-if="!balanceView" label="详情" fixed="right" width="88"><template #default="{row}"><el-button :icon="View" type="primary" link @click="openDetail(row)">查看</el-button></template></el-table-column><template #empty><EmptyState title="暂无成品库存记录" description="当前查询条件下没有匹配的数据。" /></template></el-table>
+    <p v-if="balanceView">查看库存归属：<el-button v-for="row in rows" :key="row.id" link type="primary" @click="openBatches(row)">{{ row.name }} · 批次明细</el-button></p>
     <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[10,20,50,100]" layout="total, sizes, prev, pager, next" class="pagination" @current-change="load" @size-change="page=1; load()" />
   </DataPanel>
 
   <DocumentReversal v-model="detailOpen" :document-id="detailId" @changed="load(); selectProduct()" />
+  <el-dialog v-model="batchOpen" title="成品库存批次明细" width="760px"><el-alert title="历史无批次归属库存与真实批次分别保存，不反推历史来源。" type="info" :closable="false" /><el-table :data="batchRows"><el-table-column prop="label" label="批次/库存归属" min-width="180" /><el-table-column prop="quantity" label="当前库存" /><el-table-column prop="unit" label="单位" /><el-table-column prop="production_date" label="生产日期" /></el-table></el-dialog>
 </template>
 
 <style scoped>

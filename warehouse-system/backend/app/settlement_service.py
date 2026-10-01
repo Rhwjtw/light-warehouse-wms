@@ -11,6 +11,8 @@ from app.production_service import find_order, material_rows, material_data, ord
 from app.schemas import FinishedStockInput
 from app.stock_service import business_today
 from app.unit_conversion import convert_quantity, MAX_QUANTITY
+from app.reversal_rules import effective_material_records
+from collections import defaultdict
 
 
 def loss_values(theoretical, actual):
@@ -35,11 +37,9 @@ def prepare(session, user, identity, actual_quantity, *, completing=False):
     rows = material_rows(session, order.id)
     if not rows:
         raise HTTPException(409, '生产单缺少BOM快照，不能结算')
-    records = session.execute(select(MaterialIssueRecord.order_material_id, MaterialIssueRecord.kind,
-                                    func.sum(MaterialIssueRecord.quantity))
-                              .where(MaterialIssueRecord.order_material_id.in_([row.id for row in rows]))
-                              .group_by(MaterialIssueRecord.order_material_id, MaterialIssueRecord.kind)).all()
-    totals = {(identity, kind): quantity for identity, kind, quantity in records}
+    totals = defaultdict(lambda: Decimal('0'))
+    for record in effective_material_records(session, [row.id for row in rows]):
+        totals[record.order_material_id, record.kind] += record.quantity
     if not any(kind in ('issue', 'supplement') for _, kind in totals):
         raise HTTPException(409, '生产单至少需要一次有效领料或补料记录')
     results = []
@@ -81,7 +81,7 @@ def complete(session, user, identity, payload):
         request_id=f'production-complete-{order.id}', product_id=order.product_id,
         quantity=order.actual_quantity, unit=order.unit, business_date=business_today(),
         business_type='production', reference_no=order.order_no,
-    ), 'finished_receipt', production_order=order)
+    ), 'finished_receipt', production_order=order, production_batches=payload.finished_batches)
     # 成品入库、结算字段、订单状态和审计共享同一个请求事务，任一步失败都会整体回滚。
     order.status = 'completed'
     order.completed_at = order.updated_at = utcnow()

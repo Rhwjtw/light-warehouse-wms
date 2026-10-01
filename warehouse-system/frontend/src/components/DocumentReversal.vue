@@ -5,14 +5,15 @@ import { api } from '../api'
 import { auth } from '../auth'
 import { canOperate } from '../permissions'
 
-const props = defineProps({ modelValue: Boolean, documentId: Number })
+const props = defineProps({ modelValue: Boolean, documentId: Number, readOnly: Boolean })
 const emit = defineEmits(['update:modelValue', 'changed'])
 const open = computed({ get: () => props.modelValue, set: value => emit('update:modelValue', value) })
 const detail = ref(null), preview = ref(null), reason = ref(''), error = ref(''), loading = ref(false), saving = ref(false)
-const canReverse = computed(() => canOperate(auth.user?.role, 'stock.reversal.write'))
+const canReverse = computed(() => !props.readOnly && canOperate(auth.user?.role, 'stock.reversal.write'))
 let generation = 0, requestId = '', requestReason = ''
 const labels = { material_receipt: '原材料入库', putaway: '上架', transfer: '移库', finished_receipt: '成品入库', adjustment: '库存调整', material_outbound: '原材料普通出库', finished_outbound: '成品普通出库', reversal: '冲销单' }
 const stateLabel = computed(() => detail.value?.status === 'reversed' ? '已冲销' : detail.value?.status === 'reversal' ? '冲销单' : '正常')
+Object.assign(labels, { issue: '生产领料', supplement: '生产补料', return: '生产退料' })
 function time(value) { return value ? new Date(value).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false }) : '—' }
 async function load(id) {
   const ticket = ++generation
@@ -22,7 +23,7 @@ async function load(id) {
     const result = await api.get(`/stock-documents/${id}`)
     if (ticket !== generation) return
     detail.value = result.data
-    if (result.data.status === 'normal' && ['material_outbound', 'finished_outbound', 'material_receipt', 'putaway', 'transfer', 'finished_receipt', 'adjustment'].includes(result.data.kind)) {
+    if (!props.readOnly && result.data.status === 'normal' && ['material_outbound', 'finished_outbound', 'material_receipt', 'putaway', 'transfer', 'finished_receipt', 'adjustment', 'issue', 'supplement', 'return'].includes(result.data.kind)) {
       const next = await api.get(`/stock-documents/${id}/reversal-preview`)
       if (ticket === generation) preview.value = next.data
     }
@@ -34,7 +35,7 @@ watch(() => [props.modelValue, props.documentId], ([visible, id]) => {
   else generation++
 })
 async function execute() {
-  if (!preview.value?.eligible || saving.value) return
+  if (!canReverse.value || !preview.value?.eligible || saving.value) return
   const clean = reason.value.trim()
   if (!clean) { error.value = '请填写冲销原因'; return }
   try {
@@ -78,7 +79,8 @@ async function execute() {
         <el-table :data="detail.transactions" border size="small">
           <el-table-column prop="item_name" label="物料/成品" min-width="130" />
           <el-table-column prop="unit" label="单位" width="65" />
-          <el-table-column prop="batch_no" label="原料批次" min-width="110" />
+          <el-table-column prop="batch_no" label="批次" min-width="110" />
+          <el-table-column label="库存归属" min-width="150"><template #default="{row}">{{ row.stock_scope === 'aggregate' ? '历史无批次归属库存' : row.stock_scope === 'batch' ? '真实成品批次' : '原料批次' }}</template></el-table-column>
           <el-table-column prop="source_location_name" label="原库位" min-width="100" />
           <el-table-column prop="target_location_name" label="目标库位" min-width="100" />
           <el-table-column prop="before_quantity" label="变动前" min-width="95" />

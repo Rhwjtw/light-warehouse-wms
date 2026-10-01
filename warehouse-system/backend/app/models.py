@@ -226,7 +226,7 @@ class StockDocument(Identity, Base):
         CheckConstraint("(kind <> 'reversal' AND reverses_document_id IS NULL AND reverses_kind IS NULL "
                         "AND original_document_no_snapshot IS NULL AND reversal_reason IS NULL) OR "
                         "(kind = 'reversal' AND reverses_document_id IS NOT NULL AND reverses_kind IS NOT NULL "
-                        "AND reverses_kind IN ('material_outbound','finished_outbound','material_receipt','putaway','transfer','finished_receipt','adjustment') "
+                        "AND reverses_kind IN ('material_outbound','finished_outbound','material_receipt','putaway','transfer','finished_receipt','adjustment','issue','supplement','return') "
                         "AND original_document_no_snapshot IS NOT NULL "
                         "AND reversal_reason IS NOT NULL AND CHAR_LENGTH(TRIM(reversal_reason)) > 0)",
                         name='valid_reversal'),
@@ -312,34 +312,42 @@ class MaterialRequest(Identity, Timestamps, Base):
 
 
 class FinishedBatch(Identity, Timestamps, Base):
-    # 第一版不向用户暴露成品批次：每个成品使用一条 aggregate 行承载普通入出库和生产入库余额。
+    # aggregate 保留历史事实；batch 是生产完工产生的真实批次，不反推历史归属。
     __tablename__ = 'finished_batches'
     product_id: Mapped[int] = mapped_column(ForeignKey('finished_products.id'), index=True)
     batch_no: Mapped[str] = mapped_column(String(80))
     location_id: Mapped[int | None] = mapped_column(ForeignKey('locations.id'))
-    # NULL 保留原批次结构；aggregate 为当前每成品唯一的汇总库存，页面不暴露内部批号。
+    # NULL保留旧库位行；aggregate保留无批次库存；batch为新的真实生产批次。
     stock_scope: Mapped[str | None] = mapped_column(String(16))
     unit: Mapped[str] = mapped_column(ForeignKey('units.code'))
     remaining_quantity: Mapped[Decimal] = mapped_column(QTY)
     production_date: Mapped[date | None] = mapped_column(Date)
     expiry_date: Mapped[date | None] = mapped_column(Date)
+    aggregate_product_id: Mapped[int | None] = mapped_column(Integer, Computed(
+        "CASE WHEN stock_scope = 'aggregate' THEN product_id ELSE NULL END", persisted=True))
+    real_batch_no: Mapped[str | None] = mapped_column(String(80), Computed(
+        "CASE WHEN stock_scope = 'batch' THEN batch_no ELSE NULL END", persisted=True))
     __table_args__ = (UniqueConstraint('product_id', 'batch_no', 'location_id'),
-                     UniqueConstraint('product_id', 'stock_scope', name='uq_finished_batches_product_scope'),
+                     UniqueConstraint('aggregate_product_id', name='uq_finished_batches_aggregate_product'),
+                     UniqueConstraint('product_id', 'real_batch_no', name='uq_finished_batches_real_batch'),
                      CheckConstraint("(stock_scope IS NULL AND location_id IS NOT NULL) OR "
                                      "(stock_scope IS NOT NULL AND stock_scope = 'aggregate' AND location_id IS NULL AND batch_no = '__aggregate__' "
-                                     "AND production_date IS NULL AND expiry_date IS NULL)", name='valid_scope'),
+                                     "AND production_date IS NULL AND expiry_date IS NULL) OR "
+                                     "(stock_scope IS NOT NULL AND stock_scope = 'batch' AND location_id IS NULL AND production_date IS NOT NULL "
+                                     "AND CHAR_LENGTH(TRIM(batch_no)) > 0 AND batch_no <> '__aggregate__')", name='valid_scope'),
                      CheckConstraint('remaining_quantity >= 0', name='nonnegative_stock'),
                      CheckConstraint('expiry_date IS NULL OR production_date IS NULL OR expiry_date >= production_date', name='valid_dates'))
 
 
 class FinishedReceipt(Identity, Base):
-    # production_order_id 唯一，数据库层防止同一生产单被重复完工入库。
+    # 单据头仍为 StockDocument；每行是同一次完工中的一个批次入库事实。
     __tablename__ = 'finished_receipts'
-    document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), unique=True)
-    production_order_id: Mapped[int | None] = mapped_column(ForeignKey('production_orders.id'), unique=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey('stock_documents.id'), index=True)
+    production_order_id: Mapped[int | None] = mapped_column(ForeignKey('production_orders.id'), index=True)
     batch_id: Mapped[int] = mapped_column(ForeignKey('finished_batches.id'), index=True)
     quantity: Mapped[Decimal] = mapped_column(QTY)
-    __table_args__ = (CheckConstraint('quantity > 0', name='positive_quantity'),)
+    __table_args__ = (UniqueConstraint('production_order_id', 'batch_id', name='uq_finished_receipts_order_batch'),
+                     CheckConstraint('quantity > 0', name='positive_quantity'))
 
 
 class FinishedOutbound(Identity, Base):

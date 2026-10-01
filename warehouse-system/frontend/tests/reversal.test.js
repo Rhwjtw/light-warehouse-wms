@@ -8,7 +8,7 @@ import { canOperate } from '../src/permissions.js'
 // Execute the real SFC setup against transport/dialog doubles. Browser checks cover rendering.
 const source = parse(readFileSync(new URL('../src/components/DocumentReversal.vue', import.meta.url), 'utf8')).descriptor.scriptSetup.content
 const body = source.replace(/^import .*$/gm, '') + '\nreturn {load, execute, detail, preview, reason, error, canReverse}'
-function component({ kind = 'putaway', role = 'warehouse', eligible = true, cancel = false, lostResponse = false } = {}) {
+function component({ kind = 'putaway', role = 'warehouse', eligible = true, cancel = false, lostResponse = false, readOnly = false } = {}) {
   const sent = [], emitted = [], confirmations = []
   let reversed = false, sequence = 0
   const api = {
@@ -26,7 +26,7 @@ function component({ kind = 'putaway', role = 'warehouse', eligible = true, canc
   const factory = new Function('computed','ref','watch','ElMessage','ElMessageBox','api','auth','canOperate','defineProps','defineEmits','crypto',body)
   const state = factory(computed,ref,()=>{}, {success(){}}, {async confirm(text) {
     confirmations.push(text); if(cancel) throw new Error('cancel')
-  }}, api,{user:{role}},canOperate,()=>({modelValue:true,documentId:7}),()=>name=>emitted.push(name),{randomUUID:()=>`key-${++sequence}`})
+  }}, api,{user:{role}},canOperate,()=>({modelValue:true,documentId:7,readOnly}),()=>name=>emitted.push(name),{randomUUID:()=>`key-${++sequence}`})
   return {state,sent,emitted,confirmations}
 }
 
@@ -55,14 +55,21 @@ test('network retry keeps the same request key; edited reason creates a new key'
   state.reason.value='wrong location'; await state.execute()
   assert.notEqual(sent[1].payload.request_id,sent[2].payload.request_id)
 })
-test('all seven supported kinds preview; blocked previews cannot submit; production/count excluded', async () => {
-  for (const kind of ['material_receipt','putaway','transfer','finished_receipt','adjustment','material_outbound','finished_outbound']) {
+test('unfinished production kinds preview; blocked previews cannot submit; counts excluded', async () => {
+  for (const kind of ['material_receipt','putaway','transfer','finished_receipt','adjustment','material_outbound','finished_outbound','issue','supplement','return']) {
     const {state,sent}=component({kind,eligible:false})
     await state.load(7); assert.equal(state.preview.value.eligible,false)
     state.reason.value='blocked'; await state.execute(); assert.equal(sent.length,0)
   }
-  for (const kind of ['issue','supplement','return','count_match']) {
+  for (const kind of ['count_match']) {
     const {state}=component({kind}); await state.load(7); assert.equal(state.preview.value,null)
   }
   for (const role of ['workshop_director','workshop','accountant']) assert.equal(component({role}).state.canReverse.value,false)
+})
+
+test('trace detail is read-only even for administrators', async () => {
+  const {state,sent,confirmations}=component({readOnly:true,role:'admin'})
+  await state.load(7); state.reason.value='not authorized on trace page'; await state.execute()
+  assert.equal(state.canReverse.value,false); assert.equal(state.preview.value,null)
+  assert.equal(sent.length,0); assert.equal(confirmations.length,0)
 })

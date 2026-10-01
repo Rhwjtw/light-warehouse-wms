@@ -156,6 +156,17 @@ class StockReversalInput(InputModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
+class FinishedAllocationInput(InputModel):
+    batch_id: int = Field(gt=0)
+    quantity: PositiveQuantity
+
+
+class FinishedProductionBatchInput(InputModel):
+    batch_no: Annotated[str, StringConstraints(min_length=1, max_length=80)]
+    quantity: PositiveQuantity
+    expiry_date: date | None = Field(default=None, ge=date(1000, 1, 1))
+
+
 class FinishedStockInput(InputModel):
     request_id: Annotated[str, StringConstraints(min_length=8, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')]
     product_id: int = Field(gt=0)
@@ -165,6 +176,7 @@ class FinishedStockInput(InputModel):
     business_type: Literal['normal', 'production'] = 'normal'
     reference_no: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
+    allocations: list[FinishedAllocationInput] | None = Field(default=None, min_length=1, max_length=100)
 
 
 class BomItemInput(InputModel):
@@ -202,6 +214,7 @@ class ProductionOrderUpdateInput(InputModel):
 
 class ProductionCompleteInput(InputModel):
     actual_quantity: PositiveQuantity
+    finished_batches: list[FinishedProductionBatchInput] | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ProductionAllocationInput(InputModel):

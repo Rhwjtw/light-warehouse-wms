@@ -129,8 +129,10 @@ def test_dashboard_matches_database_and_postings(context):
     assert receipt['in_progress_orders'] == before['in_progress_orders']
     assert quantity(receipt,'finished_in','盒') - quantity(before,'finished_in','盒') == 980
     from uuid import uuid4
+    finished_batch = context[0].get(f"/api/finished-stock/{data['product']['id']}/batches", headers=context[1]['warehouse']).json()['data'][0]
     response = context[0].post('/api/finished-outbounds', headers=context[1]['warehouse'], json={
-        'request_id':uuid4().hex,'product_id':data['product']['id'],'quantity':'10','unit':'盒','business_date':str(business_today())})
+        'request_id':uuid4().hex,'product_id':data['product']['id'],'quantity':'10','unit':'盒','business_date':str(business_today()),
+        'allocations':[{'batch_id':finished_batch['id'],'quantity':'10'}]})
     assert response.status_code == 200
     assert quantity(get(context,'dashboard/summary'),'finished_out','盒') - quantity(before,'finished_out','盒') == 10
     with Session(bind=context[2], join_transaction_mode='create_savepoint') as s:

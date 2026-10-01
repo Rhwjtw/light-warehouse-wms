@@ -99,9 +99,11 @@ def test_custom_units_flow_and_existing_units(context):
         'quantity': '1', 'unit': '卷',
     })
     assert outbound.status_code == 200 and outbound.json()['data']['unit'] == '卷'
+    finished_batch = client.get(f"/api/finished-stock/{product['id']}/batches", headers=headers['warehouse']).json()['data'][0]
     finished_outbound = post(client, headers, 'warehouse', 'finished-outbounds', {
         'request_id': uuid4().hex, 'product_id': product['id'], 'quantity': '2',
         'unit': '板', 'business_date': str(business_today()),
+        'allocations': [{'batch_id': finished_batch['id'], 'quantity': '2'}],
     })
     assert finished_outbound.status_code == 200 and finished_outbound.json()['data']['unit'] == '板'
     assert client.get(f"/api/finished-stock/{product['id']}", headers=headers['accountant']).json()['data']['quantity'] == '8.000000'

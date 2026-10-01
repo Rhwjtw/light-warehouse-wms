@@ -185,6 +185,17 @@ def reconcile(session):
                 detail = session.scalar(select(FinishedReceipt).where(FinishedReceipt.document_id == original.id))
                 if original.business_type != 'normal' or detail is None or detail.production_order_id is not None:
                     problem('reversal', reversal.id, 'production/invalid finished receipt reversal')
+            if original.kind in ('issue', 'supplement', 'return'):
+                detail = session.scalar(select(MaterialIssueRecord).where(MaterialIssueRecord.document_id == original.id))
+                snapshot = session.get(ProductionOrderMaterial, detail.order_material_id) if detail else None
+                order = session.get(ProductionOrder, snapshot.production_order_id) if snapshot else None
+                completion_docs = list(session.scalars(select(FinishedReceipt.document_id).where(
+                    FinishedReceipt.production_order_id == order.id))) if order else []
+                # Existing DATETIME has second precision: lawful reversal and completion
+                # can share a timestamp. The same order lock serializes document IDs.
+                if (order is None or order.status == 'cancelled'
+                        or completion_docs and reversal.id >= min(completion_docs)):
+                    problem('reversal', reversal.id, 'material reversal after completion or invalid order')
             if original.kind in MOVES or original.kind == 'adjustment':
                 move = transfers.get(original.id)
                 source_id = move.source_batch_id if move else next((r.material_batch_id for r in ledger_by_document[original.id]), None)
@@ -220,7 +231,9 @@ def reconcile(session):
 
     totals = defaultdict(lambda: Decimal('0'))
     for row in session.scalars(select(MaterialIssueRecord)):
-        totals[row.order_material_id, row.kind] += row.quantity
+        if not any(complete_inverse(documents[row.document_id], inverse, ledger_by_document)
+                   for inverse in reversals_by_original.get(row.document_id, [])):
+            totals[row.order_material_id, row.kind] += row.quantity
     orders = {row.id: row for row in session.scalars(select(ProductionOrder))}
     receipts = defaultdict(list)
     for row in session.scalars(select(FinishedReceipt).where(FinishedReceipt.production_order_id.is_not(None))):
@@ -249,7 +262,9 @@ def reconcile(session):
     for order in orders.values():
         linked = receipts[order.id]
         if order.status in ('completed', 'received'):
-            if len(linked) != 1 or linked[0].quantity != order.actual_quantity:
+            if (not linked or len({r.document_id for r in linked}) != 1
+                    or len({r.batch_id for r in linked}) != len(linked)
+                    or sum((r.quantity for r in linked), Decimal('0')) != order.actual_quantity):
                 problem('production_order', order.id, 'completion receipt missing/duplicated or quantity differs')
             for receipt in linked:
                 batch = session.get(FinishedBatch, receipt.batch_id)

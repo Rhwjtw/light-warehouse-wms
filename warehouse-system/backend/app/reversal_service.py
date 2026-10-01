@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app.auth import audit, require_permission
 from app.models import (FinishedBatch, FinishedOutbound, FinishedReceipt, FinishedProduct, InventoryTransaction,
                         MaterialAdjustment, MaterialTransfer,
+                        MaterialIssueRecord, ProductionOrder, ProductionOrderMaterial, utcnow,
                         Location, MaterialBatch, MaterialMovement, RawMaterial, StockDocument,
                         Supplier, User)
 from app.stock_service import MAX_QUANTITY, business_today
@@ -56,12 +57,13 @@ def document_detail(session, identity):
             batch = session.get(FinishedBatch, row.finished_batch_id)
             product = session.get(FinishedProduct, batch.product_id) if batch else None
             name = product.name if product else None
-            batch_no = None  # 成品第一版只有汇总库存，不把内部行误称为真实批次。
+            batch_no = batch.batch_no if batch and batch.stock_scope == 'batch' else None
         source = session.get(Location, row.source_location_id) if row.source_location_id else None
         target = session.get(Location, row.target_location_id) if row.target_location_id else None
         rows.append({'id': row.id, 'reverses_transaction_id': row.reverses_transaction_id,
                      'material_batch_id': row.material_batch_id, 'finished_batch_id': row.finished_batch_id,
                      'item_name': name, 'batch_no': batch_no, 'unit': row.unit,
+                     'stock_scope': batch.stock_scope if row.finished_batch_id else 'material',
                      'before_quantity': format(row.before_quantity, 'f'),
                      'change_quantity': format(row.change_quantity, 'f'),
                      'after_quantity': format(row.after_quantity, 'f'),
@@ -84,7 +86,8 @@ def document_detail(session, identity):
                          'operator_id': reversed_by.operator_id,
                          'created_at': reversed_by.created_at.isoformat()} if reversed_by else None,
             'transactions': rows,
-            'inventory_scope': 'aggregate' if document.kind.startswith('finished_') or (document.reverses_kind or '').startswith('finished_') else 'material'}
+            'inventory_scope': ('aggregate' if rows and all(r['stock_scope'] == 'aggregate' for r in rows) else 'batch')
+            if document.kind.startswith('finished_') or (document.reverses_kind or '').startswith('finished_') else 'material'}
 
 
 class ReversalConflict(HTTPException):
@@ -110,12 +113,29 @@ def _plan(session, identity, *, lock=False, request_id=None):
     raw = not document.kind.startswith('finished_')
     model = MaterialBatch if raw else FinishedBatch
     ids = [row.material_batch_id if raw else row.finished_batch_id for row in original_rows]
-    _require(len(original_rows) == (2 if document.kind in MOVES else 1)
+    production_material = document.kind in ('issue', 'supplement', 'return')
+    expected_count = len(original_rows) if production_material or document.kind == 'finished_outbound' else 2 if document.kind in MOVES else 1
+    _require(expected_count > 0 and len(original_rows) == expected_count
              and None not in ids and len(set(ids)) == len(ids)
-             and all(row.kind == document.kind and row.unit for row in original_rows),
+             and all(row.kind == document.kind and row.operator_id == document.operator_id and row.unit for row in original_rows),
              '原单库存流水不完整，不能冲销；请先核查')
     owner_ids = set(session.scalars(select(model.material_id if raw else model.product_id).where(model.id.in_(ids))))
     _require(len(owner_ids) == 1, '原单库存归属不一致')
+    order_material = None
+    production_details = []
+    if production_material:
+        production_details = list(session.scalars(select(MaterialIssueRecord).where(MaterialIssueRecord.document_id == identity)))
+        material_ids = {r.order_material_id for r in production_details}
+        _require(len(material_ids) == 1, '原单生产原料明细不完整')
+        snapshot = session.get(ProductionOrderMaterial, next(iter(material_ids)))
+        _require(snapshot is not None, '原单生产原料关联缺失')
+        # 与领补退及完工相同：先生产单，再原料汇总，再档案和库存行。
+        query = select(ProductionOrder).where(ProductionOrder.id == snapshot.production_order_id).execution_options(populate_existing=True)
+        order = session.scalar(query.with_for_update() if lock else query)
+        _require(order is not None and order.status in ('ready', 'in_progress'),
+                 '已完成、已结算或已取消生产单禁止冲销领补退', 'UNSUPPORTED_REVERSAL')
+        query = select(ProductionOrderMaterial).where(ProductionOrderMaterial.id == snapshot.id).execution_options(populate_existing=True)
+        order_material = session.scalar(query.with_for_update() if lock else query)
     owner_model = RawMaterial if raw else FinishedProduct
     query = select(owner_model).where(owner_model.id == next(iter(owner_ids))).execution_options(populate_existing=True)
     owner = session.scalar(query.with_for_update() if lock else query)
@@ -142,13 +162,36 @@ def _plan(session, identity, *, lock=False, request_id=None):
                      or (batch.stock_status == 'shelved' and _active(session.get(Location, batch.location_id))),
                      '原批次状态或库位已变化')
         else:
-            _require(batch.stock_scope == 'aggregate', '仅支持成品汇总库存数量冲销')
+            _require(batch.stock_scope in ('aggregate', 'batch'), '历史成品批次归属未确认')
     movement = None
     shelved_after = None
     first = original_rows[0]
     batch = batches[ids[0]]
     evidence = load_evidence(session, ids) if raw else None
-    if document.kind in ('material_receipt', 'material_outbound'):
+    if production_material:
+        _require(document.business_type == 'production' and document.reference_no == order.order_no
+                 and order_material.material_id == owner.id and len(production_details) == len(original_rows),
+                 '生产原单关联或明细数量异常')
+        detail_map = {r.batch_id: r for r in production_details}
+        _require(len(detail_map) == len(original_rows), '生产明细批次重复')
+        for row in original_rows:
+            detail = detail_map.get(row.material_batch_id)
+            b = batches[row.material_batch_id]
+            sign = 1 if document.kind == 'return' else -1
+            _require(detail is not None and detail.kind == document.kind and detail.quantity * sign == row.change_quantity
+                     and row.finished_batch_id is None and b.stock_status == 'shelved'
+                     and row.source_location_id == (b.location_id if sign < 0 else None)
+                     and row.target_location_id == (b.location_id if sign > 0 else None), '生产明细与原流水不一致')
+        from app.reversal_rules import effective_material_records
+        effective = effective_material_records(session, [order_material.id])
+        totals = {kind: sum((r.quantity for r in effective if r.kind == kind), Decimal('0')) for kind in ('issue', 'supplement', 'return')}
+        _require(tuple(totals[k] for k in ('issue', 'supplement', 'return')) ==
+                 (order_material.issued_quantity, order_material.supplemented_quantity, order_material.returned_quantity), '原料汇总与有效事实不一致')
+        for b_id in ids:
+            net = sum((r.quantity * (1 if r.kind != 'return' else -1) for r in effective
+                       if r.batch_id == b_id and r.document_id != identity), Decimal('0'))
+            _require(net >= 0, '冲销后该批次退料超过有效领补料，请先冲销相关退料', 'DOWNSTREAM_DEPENDENCY')
+    elif document.kind in ('material_receipt', 'material_outbound'):
         details = list(session.scalars(select(MaterialMovement).where(MaterialMovement.document_id == identity)
                                       .execution_options(populate_existing=True)))
         _require(len(details) == 1, '原单入出库明细不完整')
@@ -219,13 +262,16 @@ def _plan(session, identity, *, lock=False, request_id=None):
         incoming = document.kind == 'finished_receipt'
         detail_model = FinishedReceipt if incoming else FinishedOutbound
         details = list(session.scalars(select(detail_model).where(detail_model.document_id == identity)))
-        _require(len(details) == 1, '成品原单明细不完整')
-        detail = details[0]
-        _require(document.business_type == 'normal' and (not incoming or detail.production_order_id is None),
+        _require(len(details) == len(original_rows), '成品原单明细不完整')
+        _require(document.business_type == 'normal' and (not incoming or all(d.production_order_id is None for d in details)),
                  '生产入库禁止通用冲销，仅支持普通汇总库存数量冲销', 'UNSUPPORTED_REVERSAL')
-        _require(detail.batch_id == batch.id and detail.quantity == (first.change_quantity if incoming else -first.change_quantity)
-                 and first.material_batch_id is None and first.source_location_id is None and first.target_location_id is None,
-                 '成品原单明细与流水不一致')
+        by_batch = {d.batch_id: d for d in details}
+        _require(len(by_batch) == len(details), '成品明细批次重复')
+        for row in original_rows:
+            detail = by_batch.get(row.finished_batch_id)
+            _require(detail is not None and detail.quantity == (row.change_quantity if incoming else -row.change_quantity)
+                     and row.material_batch_id is None and row.source_location_id is None and row.target_location_id is None,
+                     '成品原单明细与流水不一致')
     changes = []
     for row in original_rows:
         b = batches[row.material_batch_id if raw else row.finished_batch_id]
@@ -235,13 +281,14 @@ def _plan(session, identity, *, lock=False, request_id=None):
         _require(after <= MAX_QUANTITY and (not raw or after <= b.received_quantity),
                  '冲销后余额超过可保存范围或历史累计流入量', 'STOCK_LIMIT')
         location = session.get(Location, b.location_id) if raw and b.location_id else None
-        changes.append({'item_name': owner.name, 'batch_no': b.batch_no if raw else None,
+        changes.append({'item_name': owner.name, 'batch_no': b.batch_no if raw or b.stock_scope == 'batch' else None,
                         'location_name': location.name if location else '待上架' if raw else '成品汇总库存',
                         'batch_id': b.id, 'unit': b.unit, 'before_quantity': format(before, 'f'),
                         'change_quantity': format(change, 'f'), 'after_quantity': format(after, 'f'),
                         'reverses_transaction_id': row.id})
     return {'document': document, 'rows': original_rows, 'batches': batches, 'changes': changes,
-            'movement': movement, 'shelved_after': shelved_after}
+            'movement': movement, 'shelved_after': shelved_after, 'order_material': order_material,
+            'material_quantity': sum((r.quantity for r in production_details), Decimal('0'))}
 
 
 def reversal_preview(session, identity):
@@ -251,8 +298,7 @@ def reversal_preview(session, identity):
     try:
         plan = _plan(session, identity)
         return {**base, 'eligible': True, 'code': 'OK',
-                'message': ('成品汇总库存数量冲销，不识别具体实物批次；' if document.kind.startswith('finished_') else '')
-                           + '仅支持整单冲销；提交时重新校验实时库存及有效下游业务',
+                'message': '仅支持整单冲销；各批次分别恢复数量，提交时重新校验实时库存及有效下游业务',
                 'changes': plan['changes'], 'shelved_quantity_after':
                     format(plan['shelved_after'], 'f') if plan['shelved_after'] is not None else None}
     except HTTPException as exc:
@@ -293,6 +339,11 @@ def reverse_document(session, user, identity, payload):
         raise ReversalConflict('DATA_CONFLICT', '冲销单关联冲突，请刷新后核查') from None
     for change in plan['changes']:
         plan['batches'][change['batch_id']].remaining_quantity = Decimal(change['after_quantity'])
+    if plan['order_material'] is not None:
+        field = {'issue': 'issued_quantity', 'supplement': 'supplemented_quantity', 'return': 'returned_quantity'}[document.kind]
+        row = plan['order_material']
+        setattr(row, field, getattr(row, field) - plan['material_quantity'])
+        row.updated_at = utcnow()
     session.flush()
     if plan['movement'] is not None:
         plan['movement'].shelved_quantity = plan['shelved_after']

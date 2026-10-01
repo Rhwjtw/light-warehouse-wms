@@ -107,10 +107,13 @@ def order_data(session, order: ProductionOrder, *, include_details: bool = True)
         .where(ProductionOrderMaterial.production_order_id == order.id)
         .order_by(MaterialIssueRecord.id.desc())
     ).all()
+    from app.reversal_rules import reversed_document_ids
+    reversed_ids = reversed_document_ids(session, [document.id for _, document, *_ in records])
     result['material_records'] = [{
         'id': record.id,
         'document_id': document.id,
         'document_no': document.document_no,
+        'is_reversed': document.id in reversed_ids,
         'order_material_id': record.order_material_id,
         'batch_id': batch.id,
         'batch_no': batch.batch_no,
@@ -350,16 +353,10 @@ def post_material(session, user, order_id: int, payload, kind: str) -> dict:
                 raise HTTPException(409, f'批次 {batch.batch_no} 库存不足')
         else:
             # 退料只能回到本生产单实际领过的原批次，上限按该批次领料+补料-历史退料计算。
-            issued = session.scalar(select(func.coalesce(func.sum(MaterialIssueRecord.quantity), 0)).where(
-                MaterialIssueRecord.order_material_id == order_material.id,
-                MaterialIssueRecord.batch_id == batch.id,
-                MaterialIssueRecord.kind.in_(('issue', 'supplement')),
-            ))
-            returned = session.scalar(select(func.coalesce(func.sum(MaterialIssueRecord.quantity), 0)).where(
-                MaterialIssueRecord.order_material_id == order_material.id,
-                MaterialIssueRecord.batch_id == batch.id,
-                MaterialIssueRecord.kind == 'return',
-            ))
+            from app.reversal_rules import effective_material_records
+            effective = [r for r in effective_material_records(session, [order_material.id]) if r.batch_id == batch.id]
+            issued = sum((r.quantity for r in effective if r.kind in ('issue', 'supplement')), Decimal('0'))
+            returned = sum((r.quantity for r in effective if r.kind == 'return'), Decimal('0'))
             if quantity > issued - returned:
                 raise HTTPException(409, f'批次 {batch.batch_no} 退料数量超过该生产单累计净领出量')
             if batch.remaining_quantity + quantity > batch.received_quantity:
