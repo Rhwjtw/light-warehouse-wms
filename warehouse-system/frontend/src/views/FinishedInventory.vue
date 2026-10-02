@@ -12,6 +12,7 @@ import FilterBar from '../components/ui/FilterBar.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import TableSkeleton from '../components/ui/TableSkeleton.vue'
 import DocumentReversal from '../components/DocumentReversal.vue'
+import { finishedPostingBalanceLabel } from '../finishedPostingLabel'
 
 const route = useRoute()
 const resource = computed(() => route.meta.resource)
@@ -129,7 +130,7 @@ watch(resource, async () => {
 
   <div v-if="error || success" class="feedback-stack">
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
-    <el-alert v-if="success" :title="`记账成功：${success.document_no}，记账后库存 ${success.after_quantity} ${success.unit}`" type="success" :closable="false" show-icon />
+    <el-alert v-if="success" :title="`记账成功：${success.document_no}，${finishedPostingBalanceLabel(success)} ${success.after_quantity} ${success.unit}`" type="success" :closable="false" show-icon />
   </div>
 
   <DataPanel v-if="!isStock && canWrite" :title="formTitle" :description="isReceipt ? '选择成品并填写数量，即可完成普通入库。' : '当前库存会实时显示，出库数量不能超过可用余额。'" kind="action">

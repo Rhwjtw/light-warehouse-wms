@@ -282,7 +282,8 @@ def _plan(session, identity, *, lock=False, request_id=None):
                  '冲销后余额超过可保存范围或历史累计流入量', 'STOCK_LIMIT')
         location = session.get(Location, b.location_id) if raw and b.location_id else None
         changes.append({'item_name': owner.name, 'batch_no': b.batch_no if raw or b.stock_scope == 'batch' else None,
-                        'location_name': location.name if location else '待上架' if raw else '成品汇总库存',
+                        'location_name': location.name if location else '待上架' if raw else
+                        '真实成品批次' if b.stock_scope == 'batch' else '历史无批次归属库存',
                         'batch_id': b.id, 'unit': b.unit, 'before_quantity': format(before, 'f'),
                         'change_quantity': format(change, 'f'), 'after_quantity': format(after, 'f'),
                         'reverses_transaction_id': row.id})

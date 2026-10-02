@@ -55,6 +55,10 @@ def test_multi_batch_complete_outbound_aggregate_and_inverse(context):
     outgoing_heads = ok(data['client'].get('/api/finished-outbounds', params={'product_id': data['product']['id']}, headers=data['headers']['admin']))
     assert outgoing_heads['total'] == 1 and Decimal(outgoing_heads['items'][0]['change_quantity']) == -100
     assert [Decimal(b['quantity']) for b in batches(data)] == [7, 540, 360]
+    reversal_preview = ok(data['client'].get(f"/api/stock-documents/{doc['id']}/reversal-preview", headers=data['headers']['warehouse']))
+    assert {r['location_name'] for r in reversal_preview['changes']} == {'真实成品批次'}
+    aggregate_preview = ok(data['client'].get(f"/api/stock-documents/{heads['items'][1]['id']}/reversal-preview", headers=data['headers']['warehouse']))
+    assert {r['location_name'] for r in aggregate_preview['changes']} == {'历史无批次归属库存'}
     forward = trace(data, 'material-batches', data['batches'][0])
     assert {b['batch_no'] for b in forward['production_orders'][0]['finished_batches']} == {'FG-A', 'FG-B'}
     backward = trace(data, 'finished-batches', stock[1]['id'])
