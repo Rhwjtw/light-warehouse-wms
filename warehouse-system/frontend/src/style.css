@@ -7,7 +7,7 @@
 html,
 body,
 #app {
-  min-width: 960px;
+  min-width: 0;
   min-height: 100%;
 }
 
@@ -69,6 +69,7 @@ p {
 }
 
 .app-shell {
+  min-width: 960px;
   min-height: 100vh;
   background: var(--wms-bg);
 }
@@ -170,9 +171,11 @@ p {
 }
 
 .sidebar-footer {
+  flex: 0 0 auto;
   padding: 16px 20px 20px;
   color: var(--wms-text-tertiary);
   font-size: 11px;
+  line-height: 1.8;
   white-space: nowrap;
 }
 
@@ -181,9 +184,13 @@ p {
   padding-inline: 18px;
 }
 
-.sidebar.is-collapsed .brand-copy,
-.sidebar.is-collapsed .sidebar-footer {
+.sidebar.is-collapsed .brand-copy {
   display: none;
+}
+
+.sidebar.is-collapsed .sidebar-footer {
+  padding-inline: 10px;
+  text-align: center;
 }
 
 .workspace {

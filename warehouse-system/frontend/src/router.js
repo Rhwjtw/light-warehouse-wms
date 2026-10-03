@@ -5,6 +5,7 @@ import { auth, restoreAuth } from './auth'
 const Dashboard = () => import('./views/Dashboard.vue')
 const Expiry = () => import('./views/Expiry.vue')
 const Settings = () => import('./views/Settings.vue')
+const About = () => import('./views/About.vue')
 const OperationLogs = () => import('./views/OperationLogs.vue')
 const Catalog = () => import('./views/Catalog.vue')
 const Users = () => import('./views/Users.vue')
@@ -24,7 +25,7 @@ export const menuGroups = [
   { label: '生产管理', items: [['boms', 'BOM 配方'], ['orders', '生产单'], ['issues', '车间领料'], ['supplements', '车间补料'], ['returns', '车间退料'], ['losses', '损耗统计']] },
   { label: '预警中心', items: [['expiry', '有效期预警']] },
   { label: '批次追溯', items: [['traceability', '批次追溯']] },
-  { label: '系统管理', items: [['users', '用户管理'], ['suppliers', '供应商'], ['locations', '库位'], ['settings', '基础设置'], ['logs', '操作日志'], ['reversals', '冲销记录']] },
+  { label: '系统管理', items: [['users', '用户管理'], ['suppliers', '供应商'], ['locations', '库位'], ['settings', '基础设置'], ['about', '关于系统'], ['logs', '操作日志'], ['reversals', '冲销记录']] },
 ]
 
 const router = createRouter({
@@ -33,7 +34,7 @@ const router = createRouter({
     { path: '/login', component: Login, meta: { title: '登录', public: true } },
     { path: '/', component: Dashboard, meta: { title: '首页' } },
     ...menuGroups.flatMap(group => group.items.map(([path, label]) => ({
-      path: `/${path}`, component: path === 'traceability' ? Traceability : path === 'expiry' ? Expiry : path === 'settings' ? Settings : path === 'logs' ? OperationLogs : path === 'reversals' ? Reversals : path === 'losses' ? Losses : path === 'boms' ? Boms : ['orders','issues','supplements','returns'].includes(path) ? ProductionOrders : ['finished-receipts','finished-outbounds','finished-stock'].includes(path) ? FinishedInventory : ['material-putaways','material-location-stock','material-transfers','material-counts'].includes(path) ? MaterialLocations : ['material-receipts','material-outbounds','material-stock','batches','material-transactions'].includes(path) ? MaterialInventory : path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : Dashboard,
+      path: `/${path}`, component: path === 'about' ? About : path === 'traceability' ? Traceability : path === 'expiry' ? Expiry : path === 'settings' ? Settings : path === 'logs' ? OperationLogs : path === 'reversals' ? Reversals : path === 'losses' ? Losses : path === 'boms' ? Boms : ['orders','issues','supplements','returns'].includes(path) ? ProductionOrders : ['finished-receipts','finished-outbounds','finished-stock'].includes(path) ? FinishedInventory : ['material-putaways','material-location-stock','material-transfers','material-counts'].includes(path) ? MaterialLocations : ['material-receipts','material-outbounds','material-stock','batches','material-transactions'].includes(path) ? MaterialInventory : path === 'users' ? Users : ['materials', 'products', 'suppliers', 'locations'].includes(path) ? Catalog : Dashboard,
       meta: { title: label, group: group.label, resource: path },
     }))),
     { path: '/:pathMatch(.*)*', redirect: '/' },

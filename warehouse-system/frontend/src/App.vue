@@ -6,6 +6,7 @@ import { menuGroups } from './router'
 import { auth } from './auth'
 import { canAccess } from './permissions'
 import AccountBar from './components/AccountBar.vue'
+import { SYSTEM_INFO } from './config/system'
 
 const route = useRoute()
 const groups = computed(() => menuGroups.map(group => ({ ...group, items: group.items.filter(([path]) => canAccess(auth.user?.role, path)) })).filter(group => group.items.length))
@@ -32,7 +33,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', syncViewport))
           <el-menu-item v-for="[path, label] in group.items" :key="path" :index="`/${path}`">{{ label }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
-      <div class="sidebar-footer">v1.0.0 · 轻仓工作台</div>
+      <div class="sidebar-footer">
+        <div>{{ collapsed ? SYSTEM_INFO.version : `${SYSTEM_INFO.shortName} ${SYSTEM_INFO.version}` }}</div>
+        <div v-if="!collapsed">Developed by {{ SYSTEM_INFO.developer }}</div>
+      </div>
     </el-aside>
     <el-container class="workspace">
       <el-header class="topbar">

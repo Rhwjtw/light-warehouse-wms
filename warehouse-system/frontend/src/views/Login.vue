@@ -2,6 +2,7 @@
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { login } from '../auth'
+import { SYSTEM_INFO } from '../config/system'
 const route = useRoute(), router = useRouter()
 const form = reactive({ username: '', password: '' })
 const loading = ref(false), error = ref('')
@@ -30,13 +31,16 @@ async function submit() {
       </el-form>
       <p class="login-help">忘记密码请联系管理员。连续 5 次密码错误将暂时锁定 15 分钟。</p>
     </section>
-    <p class="login-footer">轻仓 WMS · 仓库与生产领料系统</p>
+    <footer class="login-footer">
+      <div>{{ SYSTEM_INFO.nameEn }} · {{ SYSTEM_INFO.version }}</div>
+      <div>Designed &amp; Developed by {{ SYSTEM_INFO.developer }}</div>
+    </footer>
   </main>
 </template>
 
 <style scoped>
-.login-page { min-height: 100vh; display: grid; place-items: center; padding: 42px 24px 68px; background: var(--wms-bg); position: relative; }
-.login-shell { width: min(100%, 430px); padding: 36px 38px 30px; border: 1px solid var(--wms-border); border-radius: var(--wms-radius-dialog); background: var(--wms-surface); box-shadow: 0 18px 55px rgba(15, 23, 42, 0.07); }
+.login-page { min-height: 100vh; display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 42px 24px 22px; background: var(--wms-bg); }
+.login-shell { width: min(100%, 430px); margin: auto 0; padding: 36px 38px 30px; border: 1px solid var(--wms-border); border-radius: var(--wms-radius-dialog); background: var(--wms-surface); box-shadow: 0 18px 55px rgba(15, 23, 42, 0.07); }
 .login-brand { display: flex; align-items: center; gap: 12px; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
 .login-brand .brand-icon { flex: 0 0 auto; width: 42px; height: 42px; font-size: 20px; }
 .login-heading { margin: 38px 0 27px; }
@@ -49,6 +53,6 @@ async function submit() {
 .login-error { margin: 0 0 18px; }
 .login-submit { width: 100%; min-height: 43px; margin-top: 3px; }
 .login-help { margin: 22px 0 0; color: var(--wms-text-tertiary); font-size: 11px; line-height: 1.65; }
-.login-footer { position: absolute; bottom: 22px; left: 24px; right: 24px; margin: 0; color: var(--wms-text-tertiary); font-size: 11px; text-align: center; }
+.login-footer { color: var(--wms-text-tertiary); font-size: 11px; line-height: 1.8; text-align: center; }
 @media (max-width: 520px) { .login-shell { padding: 30px 24px 26px; } }
 </style>
