@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
@@ -20,6 +20,7 @@ const dialog = ref(false), mode = ref('create'), saving = ref(false), formError 
 const form = reactive({ id: null, product_id: null, product_unit: '', version: 1, status: 'draft', notes: '', items: [] })
 const preview = reactive({ finished_product_id: null, product_unit: '', planned_quantity: '1000' })
 const previewLoading = ref(false), previewError = ref(''), previewResult = ref(null)
+const deletingId = ref(null)
 const positiveDecimal = /^(?:0*[1-9]\d{0,13}|0*\.\d*[1-9]\d*|0*\d{1,14}\.\d*[1-9]\d*)$/
 const statusText = { draft: '草稿', active: '启用', inactive: '停用', archived: '归档' }
 const statusType = { draft: 'info', active: 'success', inactive: 'warning', archived: 'info' }
@@ -118,6 +119,24 @@ async function setStatus(row, nextStatus) {
     ElMessage.success(nextStatus === 'active' ? 'BOM已启用' : 'BOM已停用'); await load()
   } catch (error) { ElMessage.error(error.message) }
 }
+async function remove(row) {
+  if (!canWrite.value || deletingId.value !== null) return
+  deletingId.value = row.id
+  try {
+    const activeWarning = row.status === 'active' ? '该配方正在启用，删除后此成品需启用其他配方才能试算或新建生产单。' : ''
+    await ElMessageBox.confirm(
+      `确定删除“${row.product_name}”的 BOM V${row.version}？${activeWarning}已被生产单引用的配方不能删除；删除后保留配方记录，版本号不能重复使用。`,
+      '删除 BOM 配方', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    )
+    await api.delete(`/boms/${row.id}`)
+    if (previewResult.value?.bom_id === row.id) previewResult.value = null
+    ElMessage.success('BOM已删除')
+    if (rows.value.length === 1 && page.value > 1) page.value -= 1
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error.message)
+  } finally { deletingId.value = null }
+}
 function tryRow(row) {
   preview.finished_product_id = row.product_id; preview.product_unit = row.product_unit
   previewResult.value = null; previewError.value = ''
@@ -165,11 +184,12 @@ onMounted(async () => {
       <el-table-column prop="version" label="版本" width="80"><template #default="{row}"><span class="data-value">V{{ row.version }}</span></template></el-table-column>
       <el-table-column prop="item_count" label="原料数" width="90" />
       <el-table-column label="状态" width="100"><template #default="{row}"><StatusBadge :tone="statusType[row.status]" :label="statusText[row.status] || row.status" /></template></el-table-column>
-      <el-table-column label="操作" :width="canWrite ? 245 : 125" fixed="right"><template #default="{row}">
+      <el-table-column label="操作" :width="canWrite ? 295 : 125" fixed="right"><template #default="{row}">
         <el-button link type="primary" @click="open('view', row)">查看</el-button><el-button link type="primary" @click="tryRow(row)">试算</el-button>
         <el-button v-if="canWrite" link type="primary" @click="open('edit', row)">编辑</el-button>
         <el-button v-if="canWrite && row.status !== 'active'" link type="success" @click="setStatus(row, 'active')">启用</el-button>
         <el-button v-if="canWrite && row.status === 'active'" link type="warning" @click="setStatus(row, 'inactive')">停用</el-button>
+        <el-button v-if="canWrite" link type="danger" :loading="deletingId === row.id" :disabled="deletingId !== null" @click="remove(row)">删除</el-button>
       </template></el-table-column>
       <template #empty><EmptyState title="暂无 BOM 配方" description="可调整查询条件；管理员也可新建配方。" /></template>
     </el-table>

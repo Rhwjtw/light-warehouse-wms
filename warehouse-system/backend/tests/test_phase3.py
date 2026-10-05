@@ -9,7 +9,7 @@ from sqlalchemy.exc import DBAPIError
 
 from test_phase2 import context  # noqa: F401 - 共用真实 MySQL 回滚 fixture
 from app import stock_service
-from app.models import MaterialBatch, StockDocument, MaterialMovement, InventoryTransaction, OperationLog
+from app.models import MaterialBatch, StockDocument, MaterialMovement, InventoryTransaction, OperationLog, utcnow
 
 
 @pytest.fixture
@@ -180,11 +180,20 @@ def test_conversion_dates_and_fefo_ties(inventory):
     for change in ({'production_date':str(today+timedelta(days=1))},
                    {'expiry_date':str(today-timedelta(days=11))}):
         assert receive(inventory,**change).status_code==422
-    first=shelf(inventory, receive(inventory)).json()['data']['target_batch_id']
-    second=shelf(inventory, receive(inventory,request_id=uuid4().hex,batch_no=p['batch_no']+'2')).json()['data']['target_batch_id']
+    # 在 INSERT 时准备相同时间；应用账号禁止 UPDATE received_at，不能靠事后改历史造平局。
+    received_at = utcnow().replace(microsecond=0)
+    def same_received_at(mapper, connection, target):
+        if target.material_id == p['material_id']:
+            target.received_at = received_at
+    event.listen(MaterialBatch, 'before_insert', same_received_at)
+    try:
+        first=shelf(inventory, receive(inventory)).json()['data']['target_batch_id']
+        second=shelf(inventory, receive(inventory,request_id=uuid4().hex,batch_no=p['batch_no']+'2')).json()['data']['target_batch_id']
+    finally:
+        event.remove(MaterialBatch, 'before_insert', same_received_at)
     with Session(bind=connection,join_transaction_mode='create_savepoint') as session:
-        session.get(MaterialBatch,second).received_at=session.get(MaterialBatch,first).received_at
-        session.commit()
+        assert session.get(MaterialBatch,first).received_at == received_at
+        assert session.get(MaterialBatch,second).received_at == received_at
     assert [r['id'] for r in client.get('/api/material-fefo',headers=h['warehouse'],params={'material_id':p['material_id']}).json()['data']['items']]==[first,second]
     for change in ({'quantity':'-1'},{'quantity':0.5},{'quantity':'NaN'},{'quantity':'0'},{'unit':'L'}):
         assert out(inventory,first,**change).status_code==422

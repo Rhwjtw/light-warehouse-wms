@@ -249,3 +249,25 @@ def update_bom(identity: int, payload: BomInput, user: UserDep, session: Session
           {'product_id': product.id, 'version': bom.version, 'status': bom.status, 'item_count': len(payload.items)})
     session.flush()
     return Envelope(data=bom_data(session, bom))
+
+
+@router.delete('/boms/{identity}', response_model=Envelope)
+def delete_bom(identity: int, user: UserDep, session: SessionDep):
+    require_permission(user, session, 'bom.write')
+    # 建单也锁同一 BOM；锁后检查所有生产单（包括已取消），保留历史引用。
+    bom = find_bom(session, identity, lock=True)
+    referenced = session.scalar(select(ProductionOrder.id).where(
+        ProductionOrder.bom_id == bom.id,
+    ).limit(1))
+    if referenced is not None:
+        raise HTTPException(409, '该BOM已被生产单引用，请使用停用，不能删除')
+    previous_status = bom.status
+    # 生成列仅根据 status 判断 ACTIVE，必须同时归档，释放单启用唯一约束。
+    bom.status = 'archived'
+    bom.is_active = False
+    bom.deleted_at = utcnow()
+    bom.updated_at = bom.deleted_at
+    audit(session, user.id, 'delete_bom', 'bom_headers', bom.id,
+          {'product_id': bom.product_id, 'version': bom.version, 'previous_status': previous_status})
+    session.flush()
+    return Envelope(message='BOM已删除；配方明细和版本记录保留')

@@ -5,7 +5,7 @@ MODULES = {'users': '用户账户', 'raw_materials': '原材料档案', 'finishe
 ACTIONS = {'login': '登录', 'login_failed': '登录失败', 'logout': '退出登录', 'change_password': '修改密码',
            'create': '新增档案', 'update': '修改档案', 'archive': '删除档案',
            'create_user': '新增用户', 'update_user': '修改用户', 'archive_user': '删除用户', 'reset_password': '重置密码',
-           'create_bom': '创建BOM', 'update_bom': '修改BOM', 'update_bom_status': '修改BOM状态',
+           'create_bom': '创建BOM', 'update_bom': '修改BOM', 'update_bom_status': '修改BOM状态', 'delete_bom': '删除BOM',
            'material_receipt': '原材料入库', 'material_outbound': '原材料出库',
            'finished_receipt': '成品入库', 'finished_outbound': '成品出库',
            'create_production_order': '创建生产单', 'update_production_order': '修改生产单',
