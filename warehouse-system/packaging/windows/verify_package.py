@@ -130,6 +130,41 @@ def main():
         assert Decimal(request('GET', '/api/finished-stock/' + str(product['id']))['quantity']) == Decimal('3.123456')
         posting('stock-documents/' + str(out['id']) + '/reverse', {'reason':name})
         assert Decimal(request('GET', '/api/finished-stock/' + str(product['id']))['quantity']) == Decimal('5.123456')
+        material = request('POST', '/api/materials', {'code':'INSTALL_MATERIAL', 'name':name, 'unit':'kg'})
+        def formula(version):
+            return request('POST', '/api/boms', {'product_id':product['id'], 'version':version, 'status':'active',
+                'items':[{'material_id':material['id'], 'quantity_per_unit':'0.000001', 'unit':'kg', 'sort_order':0}]})
+        unused = formula(1)
+        unused_path = '/api/boms/' + str(unused['id'])
+        token_before = token
+        token = None
+        request('DELETE', unused_path, expected=401)
+        token = token_before
+        request('DELETE', unused_path)
+        request('GET', unused_path, expected=404)
+        request('DELETE', unused_path, expected=404)
+        protected = formula(2)
+        order = request('POST', '/api/production-orders', {'finished_product_id':product['id'], 'planned_quantity':'1'})
+        order_path = '/api/production-orders/' + str(order['id'])
+        snapshot = request('GET', order_path)
+        request('DELETE', '/api/boms/' + str(protected['id']), expected=409)
+        request('POST', order_path + '/cancel')
+        cancelled_snapshot = request('GET', order_path)
+        request('DELETE', '/api/boms/' + str(protected['id']), expected=409)
+        assert request('GET', order_path) == cancelled_snapshot
+        assert cancelled_snapshot['materials'] == snapshot['materials']
+        with db() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT status, is_active, deleted_at, active_product_id FROM bom_headers WHERE id=%s', (unused['id'],))
+                status, active, deleted, active_product = cursor.fetchone()
+                assert status == 'archived' and not active and deleted is not None and active_product is None
+                cursor.execute('SELECT quantity_per_unit FROM bom_items WHERE bom_id=%s', (unused['id'],))
+                assert cursor.fetchone()[0] == Decimal('0.000001')
+                cursor.execute("SELECT COUNT(*) FROM operation_logs WHERE action='delete_bom'")
+                assert cursor.fetchone()[0] == 1
+                cursor.execute('SELECT COUNT(*) FROM inventory_transactions')
+                assert cursor.fetchone()[0] == 3
+        report['checks'].append('packaged BOM deletion: anonymous refused, unused active version soft-deleted with items/audit preserved, next version enabled, referenced and cancelled-order versions refused, production snapshot and stock unchanged')
         with db('wms_app') as connection:
             try:
                 with connection.cursor() as cursor:
@@ -149,6 +184,8 @@ def main():
         controller = Controller(root, {})
         token = request('POST', '/api/auth/login', credentials)['access_token']
         assert Decimal(request('GET', '/api/finished-stock/' + str(product['id']))['quantity']) == Decimal('5.123456')
+        request('GET', unused_path, expected=404)
+        assert request('GET', order_path) == cancelled_snapshot
         report['checks'].append('clean stop/restart keeps account, document history and inventory')
         controller.stop(); controller = None
         restore_root = args.report.parent / 'restore-check'
@@ -186,7 +223,16 @@ def main():
                 cursor.execute('SELECT COUNT(*) FROM warehouse_standalone.inventory_transactions'); assert cursor.fetchone()[0] == 3
                 cursor.execute('SELECT COUNT(*) FROM warehouse_standalone.stock_documents'); assert cursor.fetchone()[0] == 3
                 cursor.execute('SELECT COUNT(*) FROM warehouse_standalone.users'); assert cursor.fetchone()[0] == 1
+                cursor.execute('SELECT status, deleted_at FROM warehouse_standalone.bom_headers WHERE id=%s', (unused['id'],))
+                restored_status, restored_deleted = cursor.fetchone()
+                assert restored_status == 'archived' and restored_deleted is not None
+                cursor.execute('SELECT COUNT(*) FROM warehouse_standalone.bom_items'); assert cursor.fetchone()[0] == 2
+                cursor.execute('SELECT status FROM warehouse_standalone.production_orders WHERE id=%s', (order['id'],))
+                assert cursor.fetchone()[0] == 'cancelled'
+                cursor.execute("SELECT COUNT(*) FROM warehouse_standalone.operation_logs WHERE action='delete_bom'")
+                assert cursor.fetchone()[0] == 1
             report['checks'].append('SQL backup checksum and actual restore into another empty MySQL instance: 0014, 3 documents, 3 ledger entries, 5.123456 boxes, 1 admin')
+            report['checks'].append('backup restore preserves soft-deleted BOM/items/audit and protected cancelled production order')
         finally:
             if connection is not None:
                 with connection.cursor() as cursor:
