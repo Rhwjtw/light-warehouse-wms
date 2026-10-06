@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--mysql', type=Path, required=True)
     parser.add_argument('--redist', type=Path, required=True)
     parser.add_argument('--baseline', required=True)
+    parser.add_argument('--version', default='1.3.0')
     args = parser.parse_args()
     target = args.output.resolve()
     if not target.is_relative_to(APP / '.runtime') or target.exists():
@@ -75,7 +76,7 @@ def main():
         if relative != 'VC_redist.x64.exe':
             manifest[relative] = hashlib.sha256(file.read_bytes()).hexdigest()
     (target / 'package-manifest.json').write_text(json.dumps(dict(format=1, product='LightWarehouseWMS',
-        version='1.2.0', business_baseline=args.baseline, mysql='8.4.9', python='3.12.14',
+        version=args.version, business_baseline=args.baseline, mysql='8.4.9', python='3.12.14',
         prerequisite_sha256=hashlib.sha256((target/'VC_redist.x64.exe').read_bytes()).hexdigest(), files=manifest),
         ensure_ascii=False, indent=2), encoding='utf-8')
     print('Staged', len(manifest), 'files; bytes=', sum(f.stat().st_size for f in target.rglob('*') if f.is_file()))

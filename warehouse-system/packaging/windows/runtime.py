@@ -226,6 +226,8 @@ def backup(config, data):
 
 
 def run(data):
+    if (data / 'upgrade-in-progress.json').exists():
+        raise RuntimeError('UPGRADE_INCOMPLETE_DATA_PRESERVED')
     import uvicorn  # Verify installed dependency before initializing any database.
     data.mkdir(parents=True, exist_ok=True)
     if data.is_symlink() or data.is_junction():
@@ -266,6 +268,12 @@ def run(data):
             mysql = start_mysql(config, data)
             if not config['ready']:
                 initialize(config, data, credentials)
+            with connect(config) as version_connection:
+                verify_instance(version_connection, config, data)
+                with version_connection.cursor() as version_cursor:
+                    version_cursor.execute('SELECT version_num FROM warehouse_standalone.alembic_version')
+                    if version_cursor.fetchall() != (('0015',),):
+                        raise RuntimeError('DATABASE_UPGRADE_REQUIRED')
             credentials.clear()
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1', config['web_port']))
@@ -280,7 +288,7 @@ def run(data):
                     try:
                         with request.open(url + '/api/health/db', timeout=2) as response:
                             result = json.load(response)
-                        if result['data']['migration'] == '0014' and result['data']['status'] == 'ok':
+                        if result['data']['migration'] == '0015' and result['data']['status'] == 'ok':
                             break
                     except Exception:
                         time.sleep(0.5)

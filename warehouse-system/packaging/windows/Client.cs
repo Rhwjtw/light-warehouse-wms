@@ -11,7 +11,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("轻仓 WMS 独立版")]
 [assembly: AssemblyProduct("轻仓 WMS 独立版")]
-[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
 
 internal class Client : Form
 {

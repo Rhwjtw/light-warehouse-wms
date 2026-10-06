@@ -36,4 +36,4 @@ try {
 if ($LASTEXITCODE -ne 0) { throw '运行组件打包失败。' }
 & $InnoCompiler (('/DPayload=' + (Join-Path $outputRoot 'payload'))) (('/DOutput=' + (Join-Path $outputRoot 'output'))) (Join-Path $PSScriptRoot 'installer.iss')
 if ($LASTEXITCODE -ne 0) { throw '安装包编译失败。' }
-Get-FileHash -LiteralPath (Join-Path $outputRoot 'output/轻仓WMS安装包-V1.2-Windows-x64.exe') -Algorithm SHA256
+Get-FileHash -LiteralPath (Join-Path $outputRoot 'output/轻仓WMS安装包-V1.3-Windows-x64.exe') -Algorithm SHA256

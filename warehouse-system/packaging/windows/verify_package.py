@@ -69,6 +69,7 @@ def main():
     manifest = json.loads((root / 'package-manifest.json').read_text(encoding='utf-8'))
     for relative, digest in manifest['files'].items():
         assert hashlib.sha256((root / relative).read_bytes()).hexdigest() == digest, relative
+    expected_revision = '0015' if manifest['version'] == '1.3.0' else '0014'
     report = {'checks': ['package file hashes verified'], 'business_baseline': manifest['business_baseline']}
     credentials = {'username': 'installadmin', 'password': '安装验收密码' + secrets.token_urlsafe(24)}
     controller = None
@@ -218,7 +219,7 @@ def main():
                 subprocess.run([str(mysql/'bin/mysql.exe'), '--no-defaults', '--host=127.0.0.1', '--port=33598',
                                 '--user=root', 'warehouse_standalone'], stdin=source, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
             with connection.cursor() as cursor:
-                cursor.execute('SELECT version_num FROM warehouse_standalone.alembic_version'); assert cursor.fetchone()[0] == '0014'
+                cursor.execute('SELECT version_num FROM warehouse_standalone.alembic_version'); assert cursor.fetchone()[0] == expected_revision
                 cursor.execute('SELECT remaining_quantity FROM warehouse_standalone.finished_batches'); assert cursor.fetchone()[0] == Decimal('5.123456')
                 cursor.execute('SELECT COUNT(*) FROM warehouse_standalone.inventory_transactions'); assert cursor.fetchone()[0] == 3
                 cursor.execute('SELECT COUNT(*) FROM warehouse_standalone.stock_documents'); assert cursor.fetchone()[0] == 3
@@ -231,7 +232,7 @@ def main():
                 assert cursor.fetchone()[0] == 'cancelled'
                 cursor.execute("SELECT COUNT(*) FROM warehouse_standalone.operation_logs WHERE action='delete_bom'")
                 assert cursor.fetchone()[0] == 1
-            report['checks'].append('SQL backup checksum and actual restore into another empty MySQL instance: 0014, 3 documents, 3 ledger entries, 5.123456 boxes, 1 admin')
+            report['checks'].append(f'SQL backup checksum and actual restore into another empty MySQL instance: {expected_revision}, 3 documents, 3 ledger entries, 5.123456 boxes, 1 admin')
             report['checks'].append('backup restore preserves soft-deleted BOM/items/audit and protected cancelled production order')
         finally:
             if connection is not None:

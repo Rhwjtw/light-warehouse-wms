@@ -1,4 +1,4 @@
-﻿#ifndef Payload
+#ifndef Payload
   #error Payload must point to a verified staged package
 #endif
 #ifndef Output
@@ -8,7 +8,7 @@
 [Setup]
 AppId={{924D0ED8-98CF-4BBF-B1F2-EE1E1D695B72}
 AppName=轻仓 WMS 独立版
-AppVersion=1.2.0
+AppVersion=1.3.0
 AppPublisher=宋子豪
 DefaultDirName={localappdata}\LightWarehouseWMS
 DefaultGroupName=轻仓 WMS 独立版
@@ -17,7 +17,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir={#Output}
-OutputBaseFilename=轻仓WMS安装包-V1.2-Windows-x64
+OutputBaseFilename=轻仓WMS安装包-V1.3-Windows-x64
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
