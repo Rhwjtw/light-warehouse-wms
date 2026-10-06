@@ -71,6 +71,7 @@ def document_detail(session, identity):
                      'target_location_name': target.name if target else None,
                      'created_at': row.created_at.isoformat()})
     return {'id': document.id, 'document_no': document.document_no, 'kind': document.kind,
+            'material_outbound_purpose': document.material_outbound_purpose,
             'business_type': document.business_type, 'business_date': document.business_date.isoformat()
             if document.business_date else None, 'reference_no': document.reference_no,
             'operator_id': document.operator_id, 'operator_name': operator.display_name if operator else None,

@@ -21,18 +21,17 @@ def business_today():
     return datetime.now(ZoneInfo(get_settings().business_timezone)).date()
 
 
-def fefo_conditions(material_id: int):
+def fefo_conditions(material_id: int, *, include_expired: bool = False):
     """唯一的 FEFO 可用批次口径；普通出库与生产领补料共同复用。"""
     return (
         MaterialBatch.material_id == material_id,
         MaterialBatch.stock_status == 'shelved', MaterialBatch.location_id.is_not(None),
         MaterialBatch.remaining_quantity > 0,
-        MaterialBatch.expiry_date >= business_today(),
         MaterialBatch.unit == RawMaterial.unit,
         RawMaterial.is_active.is_(True), RawMaterial.deleted_at.is_(None),
         Supplier.is_active.is_(True), Supplier.deleted_at.is_(None),
         Location.is_active.is_(True), Location.deleted_at.is_(None),
-    )
+    ) + (() if include_expired else (MaterialBatch.expiry_date >= business_today(),))
 
 
 def fefo_order():
@@ -51,6 +50,7 @@ def document_result(session, document):
     movement = session.scalar(select(MaterialMovement).where(MaterialMovement.document_id == document.id))
     transaction = session.scalar(select(InventoryTransaction).where(InventoryTransaction.document_id == document.id))
     return {'id': document.id, 'document_no': document.document_no, 'request_id': document.request_id,
+            'purpose': document.material_outbound_purpose or 'normal',
             'kind': document.kind, 'batch_id': movement.batch_id, 'unit': transaction.unit,
             'quantity': format(movement.quantity, 'f'), 'before_quantity': format(transaction.before_quantity, 'f'),
             'after_quantity': format(transaction.after_quantity, 'f')}
@@ -59,6 +59,9 @@ def document_result(session, document):
 def post_material(session, user, payload, kind):
     require_permission(user, session, 'material.inventory.write')
     content = payload.model_dump(mode='json', exclude={'request_id'})
+    # Keep old ordinary-outbound request fingerprints replayable after upgrade.
+    if content.get('purpose') == 'normal':
+        content.pop('purpose')
     # 请求指纹排除 request_id 本身；相同标识只有在操作者、类型和业务内容都一致时才可安全重放。
     content['quantity'] = format(payload.quantity.normalize(), 'f')
     fingerprint = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -78,7 +81,8 @@ def post_material(session, user, payload, kind):
         return replay(existing)
     quantity = convert_quantity(session, payload.quantity, payload.unit, material.unit)
     document = StockDocument(document_no='RM-' + uuid4().hex, request_id=payload.request_id,
-                             request_hash=fingerprint, kind=kind, operator_id=user.id, notes=payload.notes)
+                             request_hash=fingerprint, kind=kind, operator_id=user.id, notes=payload.notes,
+                             material_outbound_purpose=payload.purpose if kind == 'material_outbound' else None)
     try:
         # 唯一键负责跨原料的同请求竞态；只回滚插入 savepoint，随后读取已提交结果。
         with session.begin_nested():
@@ -111,7 +115,7 @@ def post_material(session, user, payload, kind):
             raise HTTPException(409, '批次单位与原料单位不一致')
         active_record(session, Supplier, batch.supplier_id)
         active_record(session, Location, batch.location_id)
-        if batch.expiry_date < business_today():
+        if payload.purpose == 'normal' and batch.expiry_date < business_today():
             raise HTTPException(422, '已过期批次禁止正常出库')
         before = batch.remaining_quantity
         if quantity > before:
@@ -131,6 +135,7 @@ def post_material(session, user, payload, kind):
                                     target_location_id=batch.location_id if change > 0 else None))
     session.flush()
     audit(session, user.id, kind, 'stock_documents', document.id,
-          {'batch_id': batch.id, 'quantity': format(quantity, 'f'), 'unit': batch.unit})
+          {'batch_id': batch.id, 'quantity': format(quantity, 'f'), 'unit': batch.unit,
+           **({'purpose': payload.purpose} if kind == 'material_outbound' else {})})
     session.flush()
     return document_result(session, document)

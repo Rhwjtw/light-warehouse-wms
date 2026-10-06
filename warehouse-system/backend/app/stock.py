@@ -1,5 +1,6 @@
 """原料库存只提供记账及只读查询，不开放余额编辑/删除。"""
 from fastapi import APIRouter, Query
+from typing import Literal
 from sqlalchemy import and_, select, func, or_, case
 from sqlalchemy.orm import aliased
 
@@ -223,8 +224,10 @@ def batches(user: UserDep, session: SessionDep, q: str = Query('', max_length=12
 
 @router.get('/material-fefo', response_model=Envelope)
 def fefo(user: UserDep, session: SessionDep, material_id: int = Query(..., gt=0),
+         purpose: Literal['normal', 'supplier_return', 'scrap'] = Query('normal'),
          page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
-    query = batch_query('', material_id).where(*fefo_conditions(material_id)).order_by(*fefo_order())
+    query = batch_query('', material_id).where(*fefo_conditions(
+        material_id, include_expired=purpose != 'normal')).order_by(*fefo_order())
     # 此结果是页面选批建议，实际出库/领料仍会在写事务中锁行并再次校验。
     return page_result(session, query, page, page_size)
 
@@ -257,7 +260,9 @@ def transactions(user: UserDep, session: SessionDep, q: str = Query('', max_leng
                    MaterialBatch.material_id, RawMaterial.code.label('material_code'), RawMaterial.name.label('material_name'),
                    MaterialBatch.id.label('batch_id'), MaterialBatch.batch_no, InventoryTransaction.unit,
                    InventoryTransaction.before_quantity, InventoryTransaction.change_quantity, InventoryTransaction.after_quantity,
-                   StockDocument.id.label('document_id'), StockDocument.document_no, User.display_name.label('operator_name'),
+                   StockDocument.id.label('document_id'), StockDocument.document_no,
+                   StockDocument.material_outbound_purpose, Supplier.name.label('supplier_name'),
+                   User.display_name.label('operator_name'),
                    InventoryTransaction.reverses_transaction_id, StockDocument.reverses_document_id,
                    reversed_document.id.label('reversed_by_document_id'),
                    InventoryTransaction.source_location_id, source_location.name.label('source_location_name'),
@@ -268,6 +273,7 @@ def transactions(user: UserDep, session: SessionDep, q: str = Query('', max_leng
                    ProductionOrder.id.label('production_order_id'), ProductionOrder.order_no.label('production_order_no'))
     query = query.select_from(InventoryTransaction).join(MaterialBatch, MaterialBatch.id == InventoryTransaction.material_batch_id)
     query = query.join(RawMaterial).join(StockDocument, StockDocument.id == InventoryTransaction.document_id)
+    query = query.join(Supplier, Supplier.id == MaterialBatch.supplier_id)
     query = query.outerjoin(reversed_document, reversed_document.reverses_document_id == StockDocument.id)
     query = query.join(User, User.id == InventoryTransaction.operator_id)
     query = query.outerjoin(source_location, source_location.id == InventoryTransaction.source_location_id)

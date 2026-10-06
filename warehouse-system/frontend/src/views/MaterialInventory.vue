@@ -1,7 +1,9 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox, ElRadioGroup, ElRadioButton } from 'element-plus'
+import 'element-plus/es/components/radio-group/style/css'
+import 'element-plus/es/components/radio-button/style/css'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
@@ -20,7 +22,8 @@ const receipt = computed(() => resource.value === 'material-receipts')
 const outbound = computed(() => resource.value === 'material-outbounds')
 const writePage = computed(() => receipt.value || outbound.value)
 const canWrite = computed(() => canOperate(auth.user?.role, 'material.inventory.write'))
-const form = reactive({ material_id: null, batch_no: '', batch_id: null, quantity: '', unit: 'kg', production_date: '', expiry_date: '', supplier_id: null, notes: '' })
+const form = reactive({ material_id: null, batch_no: '', batch_id: null, quantity: '', unit: 'kg', production_date: '', expiry_date: '', supplier_id: null, notes: '', purpose: 'normal' })
+const purposeNames = { normal: '普通出库', supplier_return: '供应商退货', scrap: '报废' }
 const options = reactive({ materials: [], suppliers: [] })
 const units = ref([])
 const compatibleUnits = computed(() => {
@@ -50,11 +53,13 @@ const columns = computed(() => receipt.value ? [
   ['supplier_name', '供应商'], ['location_name', '库位'],
 ] : [
   ['created_at', '记账时间'], ['document_no', '单据号'], ['material_name', '原料'], ['batch_no', '批号'], ['kind', '类型'],
+  ['material_outbound_purpose', '出库用途'], ['supplier_name', '供应商'],
   ['input_quantity', '输入数量'], ['input_unit', '输入单位'], ['before_quantity', '变动前'], ['change_quantity', '变动量'],
   ['after_quantity', '变动后'], ['unit', '库存单位'], ['source_location_name', '原库位'],
   ['target_location_name', '目标库位'], ['production_order_no', '生产单'], ['operator_name', '操作人'], ['notes', '备注'],
 ])
 function display(row, key) {
+  if (key === 'material_outbound_purpose') return row.kind === 'material_outbound' ? purposeNames[row[key] || 'normal'] : '—'
   if (key === 'kind') return ({ material_receipt: '原料入库', material_outbound: '原料出库', issue: '生产领料', supplement: '生产补料', return: '生产退料', putaway: '上架', transfer: '移库', count_gain: '盘盈', count_loss: '盘亏', adjustment: '库存调整', reversal: '冲销' })[row[key]] || row[key]
   if (key === 'status') return ({ pending: '待上架', partial: '部分上架', shelved: '已上架', reversed: '已冲销' })[row[key]] || row[key]
   if (key === 'created_at') return new Date(row[key]).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false })
@@ -84,7 +89,7 @@ async function loadBatches(selectDefault = false) {
   const ticket = ++batchGeneration
   if (!form.material_id) { candidates.value = []; candidateTotal.value = 0; return }
   try {
-    const result = await api.get('/material-fefo', { params: { material_id: form.material_id, page: candidatePage.value, page_size: 20 } })
+    const result = await api.get('/material-fefo', { params: { material_id: form.material_id, purpose: form.purpose, page: candidatePage.value, page_size: 20 } })
     // 页面默认选中 FEFO 第一批只是操作建议；服务端提交时仍会锁定批次并复核有效期和余额。
     if (ticket !== batchGeneration) return
     candidates.value = result.data.items; candidateTotal.value = result.data.total
@@ -97,6 +102,11 @@ async function materialChanged() {
   if (selected) form.unit = selected.unit
   if (outbound.value) await loadBatches(true)
 }
+async function purposeChanged() {
+  form.batch_id = null; candidates.value = []; candidateTotal.value = 0; candidatePage.value = 1
+  error.value = ''; success.value = null
+  await loadBatches(true)
+}
 async function submit() {
   if (saving.value) return
   error.value = ''; success.value = null
@@ -106,17 +116,24 @@ async function submit() {
   if (receipt.value && (!form.batch_no.trim() || !form.production_date || !form.expiry_date || !form.supplier_id)) {
     error.value = '请完整填写批号、生产日期、到期日期和供应商'; return
   }
-  if (outbound.value && !form.batch_id) { error.value = '请选择有库存且未过期的批次'; return }
+  if (outbound.value && !form.batch_id) { error.value = '请选择符合本次用途且有库存的库位批次'; return }
+  if (outbound.value && form.purpose !== 'normal' && !form.notes.trim()) { error.value = '退货或报废必须填写原因'; return }
   const payload = { material_id: form.material_id, quantity: form.quantity, unit: form.unit, notes: form.notes || null }
   if (receipt.value) Object.assign(payload, { batch_no: form.batch_no.trim(), production_date: form.production_date, expiry_date: form.expiry_date, supplier_id: form.supplier_id })
-  else payload.batch_id = form.batch_id
+  else Object.assign(payload, { batch_id: form.batch_id, purpose: form.purpose })
   const signature = JSON.stringify(payload)
   // 网络错误后保持原输入会沿用 requestId；修改任一业务字段则视为新操作并换新标识。
   if (signature !== lastPayload || !requestId) { requestId = crypto.randomUUID(); lastPayload = signature }
   saving.value = true
   try {
+    if (outbound.value && form.purpose !== 'normal') {
+      const batch = candidates.value.find(row => row.id === form.batch_id)
+      try {
+        await ElMessageBox.confirm(`确认${purposeNames[form.purpose]}：${batch?.batch_no || ''}，${form.quantity} ${form.unit}？${form.purpose === 'supplier_return' ? '退回该批次原供应商：' + (batch?.supplier_name || '') + '。' : ''}确认后扣减库存并记录原因。`, '确认原料出库', {type:'warning'})
+      } catch { return }
+    }
     const result = await api.post('/' + resource.value, { ...payload, request_id: requestId })
-    success.value = result.data; form.quantity = ''; requestId = ''; lastPayload = ''
+    success.value = result.data; form.quantity = ''; form.notes = ''; requestId = ''; lastPayload = ''
     ElMessage.success(receipt.value ? '入库成功，等待上架' : '记账成功'); await load()
     if (outbound.value) { candidatePage.value = 1; await loadBatches(true) }
   } catch (e) { error.value = e.message + '；若连接中断，可保持原输入重试。' }
@@ -125,6 +142,7 @@ async function submit() {
 watch(resource, async () => {
   generation++; batchGeneration++; page.value = 1; query.value = ''; error.value = ''; success.value = null; rows.value = []
   form.quantity = ''; form.batch_id = null; requestId = ''; lastPayload = ''; candidatePage.value = 1
+  form.purpose = 'normal'
   await load()
   if (writePage.value) {
     await Promise.all([...['materials', 'suppliers'].map(name => searchOptions(name)),
@@ -152,13 +170,15 @@ watch(resource, async () => {
         <el-col :span="12"><el-form-item label="供应商" required><el-select v-model="form.supplier_id" filterable remote :remote-method="q => searchOptions('suppliers',q)" placeholder="输入编码或名称搜索"><el-option v-for="item in options.suppliers" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name}`" /></el-select></el-form-item></el-col></el-row>
         <el-row :gutter="20"><el-col :span="12"><el-form-item label="生产日期" required><el-date-picker v-model="form.production_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></el-col><el-col :span="12"><el-form-item label="到期日期" required><el-date-picker v-model="form.expiry_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></el-col></el-row>
       </template>
-      <template v-if="outbound"><el-alert title="默认选择最早到期的可用批次；到期当天仍有效。可手动选择其他合法批次。" type="info" :closable="false" class="form-notice" />
-        <el-form-item label="出库批次" required><el-select v-model="form.batch_id" placeholder="先选择原材料"><el-option v-for="(b,i) in candidates" :key="b.id" :value="b.id" :label="`${candidatePage === 1 && i === 0 ? '推荐 · ' : ''}${b.batch_no} · 到期 ${b.expiry_date} · 余额 ${b.remaining_quantity} ${b.unit} · ${b.location_name}`" /></el-select></el-form-item>
+      <template v-if="outbound">
+        <el-form-item label="出库用途" required><el-radio-group v-model="form.purpose" @change="purposeChanged"><el-radio-button value="normal">普通出库</el-radio-button><el-radio-button value="supplier_return">供应商退货</el-radio-button><el-radio-button value="scrap">报废</el-radio-button></el-radio-group></el-form-item>
+        <el-alert :title="form.purpose === 'normal' ? '普通出库只使用未过期的已上架批次；到期当天仍有效。' : form.purpose === 'supplier_return' ? '退回所选批次原供应商；允许退回过期批次，必须填写退货原因。' : '报废扣减所选库位批次库存；允许处理过期批次，必须填写报废原因。'" :type="form.purpose === 'normal' ? 'info' : 'warning'" :closable="false" class="form-notice" />
+        <el-form-item label="出库批次" required><el-select v-model="form.batch_id" placeholder="先选择原材料"><el-option v-for="(b,i) in candidates" :key="b.id" :value="b.id" :label="`${candidatePage === 1 && i === 0 ? '推荐 · ' : ''}${b.batch_no} · ${b.expired ? '已过期 · ' : ''}到期 ${b.expiry_date} · 余额 ${b.remaining_quantity} ${b.unit} · ${b.location_name} · ${b.supplier_name}`" /></el-select></el-form-item>
         <el-pagination v-if="candidateTotal > 20" v-model:current-page="candidatePage" :total="candidateTotal" :page-size="20" layout="prev, pager, next" @current-change="form.batch_id=null; loadBatches(false)" />
         <EmptyState v-if="form.material_id && !candidateTotal" title="暂无可用批次" description="请先入库，或核查批次有效期与相关档案状态。" />
       </template>
-      <el-form-item label="备注"><el-input v-model="form.notes" maxlength="2000" placeholder="可选" /></el-form-item>
-      <el-form-item><el-button native-type="submit" type="primary" size="large" :loading="saving">{{ receipt ? '确认入库' : '确认出库' }}</el-button></el-form-item>
+      <el-form-item :label="outbound && form.purpose !== 'normal' ? '出库原因' : '备注'" :required="outbound && form.purpose !== 'normal'"><el-input v-model="form.notes" maxlength="2000" :placeholder="outbound && form.purpose !== 'normal' ? '请说明退货或报废原因' : '可选'" /></el-form-item>
+      <el-form-item><el-button native-type="submit" type="primary" size="large" :loading="saving">{{ receipt ? '确认入库' : '确认' + purposeNames[form.purpose] }}</el-button></el-form-item>
     </el-form>
   </DataPanel>
 

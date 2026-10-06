@@ -11,7 +11,7 @@ const open = computed({ get: () => props.modelValue, set: value => emit('update:
 const detail = ref(null), preview = ref(null), reason = ref(''), error = ref(''), loading = ref(false), saving = ref(false)
 const canReverse = computed(() => !props.readOnly && canOperate(auth.user?.role, 'stock.reversal.write'))
 let generation = 0, requestId = '', requestReason = ''
-const labels = { material_receipt: '原材料入库', putaway: '上架', transfer: '移库', finished_receipt: '成品入库', adjustment: '库存调整', material_outbound: '原材料普通出库', finished_outbound: '成品普通出库', reversal: '冲销单' }
+const labels = { material_receipt: '原材料入库', putaway: '上架', transfer: '移库', finished_receipt: '成品入库', adjustment: '库存调整', material_outbound: '原材料出库', finished_outbound: '成品普通出库', reversal: '冲销单' }
 const stateLabel = computed(() => detail.value?.status === 'reversed' ? '已冲销' : detail.value?.status === 'reversal' ? '冲销单' : '正常')
 Object.assign(labels, { issue: '生产领料', supplement: '生产补料', return: '生产退料' })
 function time(value) { return value ? new Date(value).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false }) : '—' }
@@ -69,6 +69,7 @@ async function execute() {
           <el-descriptions-item label="操作人">{{ detail.operator_name || '—' }}</el-descriptions-item>
           <el-descriptions-item label="操作时间">{{ time(detail.created_at) }}</el-descriptions-item>
           <el-descriptions-item label="关联单号">{{ detail.reference_no || '—' }}</el-descriptions-item>
+          <el-descriptions-item v-if="detail.kind === 'material_outbound'" label="出库用途">{{ ({normal:'普通出库',supplier_return:'供应商退货',scrap:'报废'})[detail.material_outbound_purpose || 'normal'] }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="2">{{ detail.notes || '—' }}</el-descriptions-item>
           <el-descriptions-item v-if="detail.reversal_reason" label="冲销原因" :span="2">{{ detail.reversal_reason }}</el-descriptions-item>
         </el-descriptions>

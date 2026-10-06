@@ -207,6 +207,7 @@ class StockDocument(Identity, Base):
     request_hash: Mapped[str | None] = mapped_column(String(64))
     business_date: Mapped[date | None] = mapped_column(Date)
     business_type: Mapped[str | None] = mapped_column(String(20))
+    material_outbound_purpose: Mapped[str | None] = mapped_column(String(20))
     reference_no: Mapped[str | None] = mapped_column(String(120))
     kind: Mapped[str] = mapped_column(String(32), index=True)
     reverses_document_id: Mapped[int | None] = mapped_column(Integer)
@@ -223,6 +224,11 @@ class StockDocument(Identity, Base):
                              ['stock_documents.id', 'stock_documents.kind'], name='fk_stock_documents_original_kind'),
         CheckConstraint("kind IN ('material_receipt','material_outbound','issue','supplement','return','finished_receipt','finished_outbound','putaway','transfer','count_gain','count_loss','count_match','adjustment','reversal')", name='valid_kind'),
         CheckConstraint("business_type IS NULL OR business_type IN ('normal','production')", name='valid_business_type'),
+        CheckConstraint("material_outbound_purpose IS NULL OR (kind = 'material_outbound' "
+                        "AND material_outbound_purpose IN ('normal','supplier_return','scrap') "
+                        "AND (material_outbound_purpose = 'normal' OR "
+                        "(notes IS NOT NULL AND CHAR_LENGTH(TRIM(notes)) > 0)))",
+                        name='valid_material_outbound_purpose'),
         CheckConstraint("(kind <> 'reversal' AND reverses_document_id IS NULL AND reverses_kind IS NULL "
                         "AND original_document_no_snapshot IS NULL AND reversal_reason IS NULL) OR "
                         "(kind = 'reversal' AND reverses_document_id IS NOT NULL AND reverses_kind IS NOT NULL "

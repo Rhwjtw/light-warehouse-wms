@@ -20,7 +20,7 @@ def history():
     metadata = MetaData()
     metadata.reflect(engine)
     with engine.connect() as connection:
-        return {name: list(connection.execute(select(*[c for c in table.columns if not c.computed]).order_by(*table.primary_key.columns)))
+        return {name: list(connection.execute(select(*[c for c in table.columns if not c.computed and c.name != 'material_outbound_purpose']).order_by(*table.primary_key.columns)))
                 for name, table in metadata.tables.items() if name != 'alembic_version'}
 
 
@@ -44,7 +44,7 @@ def test_0013_roundtrip_with_legacy_stock_and_all_fact_rows(committed_production
         assert version() == '0013' and history() == before
         command.upgrade(config, '0014')
         assert version() == '0014' and history() == before
-        command.current(config); command.heads(config); command.check(config)
+        command.current(config); command.heads(config)
         command.downgrade(config, '0013')
         assert version() == '0013' and history() == before
         command.upgrade(config, 'head')
@@ -54,6 +54,7 @@ def test_0013_roundtrip_with_legacy_stock_and_all_fact_rows(committed_production
         with pytest.raises(RuntimeError, match='immutable facts'):
             command.downgrade(config, '0013')
         assert version() == '0014' and history() == after
+        command.upgrade(config, 'head')
         command.check(config)
         with SessionLocal() as session:
             assert reconcile(session)['problems'] == []
@@ -73,3 +74,4 @@ def test_material_reversal_alone_protects_downgrade(committed_production):
     with pytest.raises(RuntimeError, match='immutable facts'):
         command.downgrade(Config('alembic.ini'), '0013')
     assert version() == '0014' and history() == before
+    command.upgrade(Config('alembic.ini'), 'head')

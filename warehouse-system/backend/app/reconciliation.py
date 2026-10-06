@@ -25,6 +25,12 @@ def reconcile(session):
         problems.append({'type': kind, 'id': identity, 'reason': reason})
 
     documents = {row.id: row for row in session.scalars(select(StockDocument))}
+    for doc in documents.values():
+        purpose = doc.material_outbound_purpose
+        if purpose is not None and (doc.kind != 'material_outbound'
+                or purpose not in ('normal', 'supplier_return', 'scrap')
+                or (purpose != 'normal' and not (doc.notes or '').strip())):
+            problem('document', doc.id, 'invalid material outbound purpose/reason')
     ledger = list(session.scalars(select(InventoryTransaction).order_by(InventoryTransaction.id)))
     chains = defaultdict(list)
     ledger_by_document = defaultdict(list)

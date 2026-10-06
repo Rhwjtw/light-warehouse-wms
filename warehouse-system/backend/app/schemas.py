@@ -2,7 +2,7 @@ from decimal import Decimal
 from datetime import date
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, model_validator
 
 
 class Envelope(BaseModel):
@@ -101,6 +101,13 @@ class MaterialOutboundInput(InputModel):
     quantity: PositiveQuantity
     unit: str = Field(min_length=1, max_length=16)
     notes: str | None = Field(default=None, max_length=2000)
+    purpose: Literal['normal', 'supplier_return', 'scrap'] = 'normal'
+
+    @model_validator(mode='after')
+    def require_disposition_reason(self):
+        if self.purpose != 'normal' and not self.notes:
+            raise ValueError('退货或报废必须填写原因')
+        return self
 
 
 class MaterialReceiptInput(InputModel):
