@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { auth } from '../auth'
 import { canOperate } from '../permissions'
-import { quantityUnits } from '../quantity'
+import { formatQuantity, quantityUnits } from '../quantity'
 import { mobileRevision, mobileStore, touchMobile } from './session'
 import { prototypeListLocation } from './navigation'
 import { lockedTask, taskLabels } from './taskState'
@@ -78,13 +78,13 @@ onBeforeUnmount(() => { if (timer.value) clearTimeout(timer.value); window.remov
   <section v-if="!task" class="mobile-card"><p>草稿可能已清理或属于其他账号，不能重建原请求。</p><button class="mobile-button primary" @click="returnList">返回演练列表</button></section>
   <section v-else-if="locked" class="mobile-card">
     <h2>{{ taskLabels[task.status] }}</h2><p>{{ task.reason || task.result?.label || '正在等待演练响应，请勿重复提交。' }}</p>
-    <dl class="mobile-details"><div><dt>本次数量</dt><dd>{{ task.snapshot?.quantity }} kg</dd></div><div><dt>库位</dt><dd>{{ task.snapshot?.location }}</dd></div><div><dt>请求时间</dt><dd>{{ task.submittedAt }}</dd></div><div><dt>备注</dt><dd>{{ task.snapshot?.notes || '—' }}</dd></div></dl>
+    <dl class="mobile-details"><div><dt>本次数量</dt><dd>{{ formatQuantity(task.snapshot?.quantity) }} kg</dd></div><div><dt>库位</dt><dd>{{ task.snapshot?.location }}</dd></div><div><dt>请求时间</dt><dd>{{ task.submittedAt }}</dd></div><div><dt>备注</dt><dd>{{ task.snapshot?.notes || '—' }}</dd></div></dl>
     <p v-if="task.status === 'succeeded'" class="mobile-success">演练成功，旧表单已失效。实际业务没有记账，未查询任何余额。</p>
     <template v-if="task.status === 'uncertain'"><p class="mobile-warning">必须先核对相关单据/流水。空列表、相似数量/人员/时间不能唯一确定原请求。本原型没有实际业务结果。</p><router-link to="/m/records" class="mobile-button">去记录入口（S3 尚未接入）</router-link></template>
     <button v-if="task.status === 'submitting'" class="mobile-button" @click="resolvePending">演练响应丢失，保留待核实</button>
     <button class="mobile-button primary" @click="returnList">返回原列表</button>
   </section>
   <section v-else-if="step === 'context'" class="mobile-card"><h2>返回上下文预留</h2><p>后续扫码覆盖层从此返回原表单，保留当前字段。本阶段没有相机或扫码按钮。</p><router-link :to="`/m/state-lab/${task.id}/form`" class="mobile-button primary">取消并返回原表单</router-link></section>
-  <section v-else-if="step === 'confirm'" class="mobile-card"><h2>核对演练内容</h2><dl class="mobile-details"><div><dt>记录</dt><dd>{{ task.record }}</dd></div><div><dt>库位</dt><dd>{{ form.location }}</dd></div><div><dt>数量</dt><dd>{{ form.quantity }} kg</dd></div><div><dt>备注</dt><dd>{{ form.notes || '—' }}</dd></div></dl><label class="mobile-select-label">演练响应<select v-model="outcome" aria-label="演练响应"><option value="success">明确成功</option><option value="reject">明确拒绝</option><option value="unknown">超时/响应丢失</option><option value="hold">持续提交中</option></select></label><button class="mobile-button primary" :disabled="!ready || checking || !allowed || Boolean(warning)" @click="submit">演练提交（不记账）</button><router-link :to="`/m/state-lab/${task.id}/form`" class="mobile-button">返回修改</router-link></section>
+  <section v-else-if="step === 'confirm'" class="mobile-card"><h2>核对演练内容</h2><dl class="mobile-details"><div><dt>记录</dt><dd>{{ task.record }}</dd></div><div><dt>库位</dt><dd>{{ form.location }}</dd></div><div><dt>数量</dt><dd>{{ formatQuantity(form.quantity) }} kg</dd></div><div><dt>备注</dt><dd>{{ form.notes || '—' }}</dd></div></dl><label class="mobile-select-label">演练响应<select v-model="outcome" aria-label="演练响应"><option value="success">明确成功</option><option value="reject">明确拒绝</option><option value="unknown">超时/响应丢失</option><option value="hold">持续提交中</option></select></label><button class="mobile-button primary" :disabled="!ready || checking || !allowed || Boolean(warning)" @click="submit">演练提交（不记账）</button><router-link :to="`/m/state-lab/${task.id}/form`" class="mobile-button">返回修改</router-link></section>
   <section v-else class="mobile-card"><p v-if="task.status === 'rejected'" class="mobile-error">{{ task.reason }}</p><form class="mobile-form" @submit.prevent="confirm"><label>演练库位<input v-model="form.location" maxlength="80" autocomplete="off" /></label><label>本次数量 · kg<input v-model="form.quantity" type="text" inputmode="decimal" maxlength="80" autocomplete="off" aria-describedby="lab-quantity-help" /></label><p id="lab-quantity-help" class="mobile-muted mobile-small">最多六位小数；键盘缺少小数点时可粘贴完整数字，不自动舍入。</p><label>备注（选填）<textarea v-model="form.notes" maxlength="300" rows="3"></textarea></label><p v-if="error" class="mobile-error" role="alert">{{ error }}</p><button type="submit" class="mobile-button primary" :disabled="checking || !allowed">下一步：核对</button></form><router-link :to="`/m/state-lab/${task.id}/context`" class="mobile-button">演练覆盖层返回</router-link><p class="mobile-muted mobile-small">编辑时自动保存。正常返回、刷新保留输入；退出、换账号会清理本账号草稿。</p></section>
 </template>
