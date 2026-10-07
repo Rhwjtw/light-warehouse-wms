@@ -1,4 +1,4 @@
-﻿"""Build an update zip from a verified full package or an isolated frontend build."""
+"""Build an update zip from a verified full package or an isolated frontend build."""
 import argparse, hashlib, json, os, shutil, subprocess, zipfile
 from pathlib import Path
 APP=Path(__file__).resolve().parents[2]
@@ -19,7 +19,7 @@ def main():
         if not source.is_relative_to(APP/'.runtime'):
             raise RuntimeError('Source package must be isolated')
         manifest=json.loads((source/'package-manifest.json').read_text(encoding='utf-8'))
-        if manifest['version']!='1.3.0' or manifest['business_baseline']!=args.baseline:
+        if manifest['version']!='1.3.1' or manifest['business_baseline']!=args.baseline:
             raise RuntimeError('Full package version/baseline mismatch')
         for name in ('backend','frontend','controller'):
             shutil.copytree(source/name,target/name)
@@ -52,7 +52,10 @@ def main():
             '/out:'+str(target/'轻仓WMS.exe'),str(Path(__file__).parent/'Client.cs')],check=True)
     files={f.relative_to(target).as_posix():hashlib.sha256(f.read_bytes()).hexdigest() for f in target.rglob('*') if f.is_file()}
     assert all(not k.startswith(('data/','python/','mysql/')) and not Path(k).name.startswith('.env') for k in files)
-    manifest=dict(version='1.3.0',revision='0015',business_baseline=args.baseline,files=files)
+    profile=manifest.get('frontend_profile') if args.from_package else None
+    compatibility=json.loads((Path(__file__).parent/'profiles/compatible-v13.json').read_text(encoding='utf-8'))
+    manifest=dict(version='1.3.1',revision='0015',business_baseline=args.baseline,files=files,
+        frontend_profile=profile,compatible_v13=compatibility)
     archive=target.parent/'wms-upgrade.zip'
     with zipfile.ZipFile(archive,'x',compression=zipfile.ZIP_DEFLATED) as output:
         output.writestr('upgrade-manifest.json',json.dumps(manifest,ensure_ascii=False,indent=2))

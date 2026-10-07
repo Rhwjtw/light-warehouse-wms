@@ -1,4 +1,4 @@
-"""Offline 0014 -> 0015 update of a stopped, verified standalone installation."""
+"""Verified standalone V1.2/V1.3 -> V1.3.1 maintenance; preserve existing data."""
 import argparse
 import hashlib
 import json
@@ -17,7 +17,6 @@ import zipfile
 # Install the startup guard first; any interrupted later swap keeps startup blocked.
 UNITS = ('controller', 'backend', 'frontend', '轻仓WMS.exe', '使用说明.txt', 'package-manifest.json')
 OLD_BASELINES = {'e3fbb849190498613a810f9156d02bc43d4c48e9', '90f2cf88bb9cefe0d7dfc58c0f6f9bfa2dd546e3'}
-V13_BASELINES = {'cea7c685eac60ed0e53d3c9956178906d88f6b2e', '5ba47473cf757e358072caa379df50dae850a22a'}
 NO_WINDOW = subprocess.CREATE_NO_WINDOW
 
 
@@ -216,9 +215,9 @@ def perform_normal(root, archive):
         verify_files(root, old['files'])
         with zipfile.ZipFile(archive) as package:
             new = json.loads(package.read('upgrade-manifest.json'))
-            if new['version'] != '1.3.0' or new['revision'] != '0015':
+            if new['version'] != '1.3.1' or new['revision'] != '0015':
                 raise Refusal(1)
-            already = (old.get('version') == '1.3.0' and old.get('business_baseline') == new['business_baseline']
+            already = (old.get('version') == new['version'] and old.get('business_baseline') == new['business_baseline']
                        and all(old['files'].get(k) == v for k, v in new['files'].items()))
             accepted_manifest(old, new)
             names = set(new['files']) | {'upgrade-manifest.json'}
@@ -245,7 +244,7 @@ def perform_normal(root, archive):
                 target.write_bytes(package.read(name))
         updated = {k:v for k,v in old['files'].items() if PurePosixPath(k).parts[0] not in UNITS}
         updated.update(new['files'])
-        manifest = {**old, 'version':'1.3.0', 'business_baseline':new['business_baseline'], 'files':updated}
+        manifest = {**old, 'version':new['version'], 'business_baseline':new['business_baseline'], 'files':updated, 'frontend_profile':new.get('frontend_profile')}
         (staged/'package-manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
         marker = data/'upgrade-in-progress.json'
         report = dict(target_revision='0015', target_baseline=new['business_baseline'], ok=False, phase='database_start')
@@ -259,7 +258,7 @@ def perform_normal(root, archive):
                 with con.cursor() as cur:
                     cur.execute('SELECT version_num FROM alembic_version')
                     versions = cur.fetchall()
-            source_revision = '0015' if old.get('version') == '1.3.0' else '0014'
+            source_revision = '0015' if old.get('version') in ('1.3.0','1.3.1') else '0014'
             if versions != ((source_revision,),):
                 raise Refusal(3)
             report['phase'] = 'before_check'
@@ -345,7 +344,7 @@ def write_report(path, value):
 def load_payload(archive):
     with zipfile.ZipFile(archive) as package:
         new = json.loads(package.read('upgrade-manifest.json'))
-        if new.get('version') != '1.3.0' or new.get('revision') != '0015':
+        if new.get('version') != '1.3.1' or new.get('revision') != '0015':
             raise Refusal(1)
         names = set(new['files']) | {'upgrade-manifest.json'}
         if len(package.infolist()) != len(names) or set(package.namelist()) != names:
@@ -363,12 +362,16 @@ def accepted_manifest(old, new):
         raise Refusal(1)
     if old.get('version') == '1.2.0' and old.get('business_baseline') in OLD_BASELINES:
         return
-    if old.get('version') == '1.3.0' and old.get('business_baseline') in V13_BASELINES | {new['business_baseline']}:
-        # Packaging-only V1.3 revisions must have exactly the same business code.
-        for name, expected in new['files'].items():
-            if name.startswith(('backend/', 'frontend/')) and old['files'].get(name) != expected:
-                raise Refusal(1)
-        return
+    if old.get('version') in ('1.3.0', '1.3.1'):
+        business = {k:v for k,v in old['files'].items() if k.startswith(('backend/', 'frontend/'))}
+        target = {k:v for k,v in new['files'].items() if k.startswith(('backend/', 'frontend/'))}
+        if old.get('version') == new['version'] and old.get('business_baseline') == new['business_baseline'] and business == target:
+            return
+        # Allow a changed frontend only from a published, byte-verified source inventory.
+        for release in new.get('compatible_v13', []):
+            if (old.get('version') == release['version'] and old.get('business_baseline') in release['baselines']
+                    and business == release['files']):
+                return
     raise Refusal(1)
 
 
@@ -453,7 +456,7 @@ def resume(root, archive):
                 target.write_bytes(package.read(name))
         updated = {k:v for k,v in old['files'].items() if PurePosixPath(k).parts[0] not in UNITS}
         updated.update(new['files'])
-        manifest = {**old, 'version':'1.3.0', 'business_baseline':new['business_baseline'], 'files':updated}
+        manifest = {**old, 'version':new['version'], 'business_baseline':new['business_baseline'], 'files':updated, 'frontend_profile':new.get('frontend_profile')}
         write_report(staged/'package-manifest.json', manifest)
         report = dict(ok=False, resumed=True, original_backup=str(original),
             target_revision='0015', target_baseline=new['business_baseline'], phase='resume_database')

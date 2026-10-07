@@ -24,18 +24,30 @@ $baseline = git -c "safe.directory=$($gitRoot.Replace('\','/'))" -C $gitRoot rev
 git -c "safe.directory=$($gitRoot.Replace('\','/'))" -C $gitRoot diff --quiet HEAD -- warehouse-system/backend warehouse-system/frontend
 if ($LASTEXITCODE -ne 0) { throw '业务源码有未提交修改；先核对版本，避免混入未验证代码。' }
 New-Item -ItemType Directory -Path $outputRoot | Out-Null
-Push-Location (Join-Path $appDir 'frontend')
+& $pythonExe (Join-Path $PSScriptRoot 'stage_frontend.py') --output (Join-Path $outputRoot 'frontend-source')
+if ($LASTEXITCODE -ne 0) { throw '已确认的电脑版源码还原失败。' }
+$frontendDir = Join-Path $outputRoot 'frontend-source/warehouse-system/frontend'
+$dependencyLink = Join-Path $frontendDir 'node_modules'
+New-Item -ItemType Junction -Path $dependencyLink -Value (Join-Path $appDir 'frontend/node_modules') | Out-Null
+Push-Location $frontendDir
 try {
     & 'C:\Program Files\nodejs\npm.cmd' test
     if ($LASTEXITCODE -ne 0) { throw '前端测试失败。' }
     & 'C:\Program Files\nodejs\npm.cmd' run build -- --outDir (Join-Path $outputRoot 'frontend/dist')
     if ($LASTEXITCODE -ne 0) { throw '隔离前端构建失败。' }
-} finally { Pop-Location }
+} finally {
+    Pop-Location
+    if (Test-Path -LiteralPath $dependencyLink) {
+        $link = Get-Item -LiteralPath $dependencyLink -Force
+        if (-not ($link.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw '依赖链接类型异常，保留待检查。' }
+        $link.Delete()
+    }
+}
 & $pythonExe (Join-Path $PSScriptRoot 'build_package.py') --output (Join-Path $outputRoot 'payload') `
-    --frontend (Join-Path $outputRoot 'frontend/dist') --mysql $MySqlBase --redist $VCRedist --baseline $baseline
+    --frontend (Join-Path $outputRoot 'frontend/dist') --mysql $MySqlBase --redist $VCRedist --baseline $baseline --source-profile (Join-Path $outputRoot 'frontend-source/source-profile.json')
 if ($LASTEXITCODE -ne 0) { throw '运行组件打包失败。' }
 & $pythonExe (Join-Path $PSScriptRoot 'build_upgrade.py') --output (Join-Path $outputRoot 'upgrade-payload') --from-package (Join-Path $outputRoot 'payload') --baseline $baseline
 if ($LASTEXITCODE -ne 0) { throw '升级组件打包失败。' }
 & $InnoCompiler (('/DPayload=' + (Join-Path $outputRoot 'payload'))) (('/DPayloadZip=' + (Join-Path $outputRoot 'wms-upgrade.zip'))) (('/DOutput=' + (Join-Path $outputRoot 'output'))) (Join-Path $PSScriptRoot 'installer.iss')
 if ($LASTEXITCODE -ne 0) { throw '安装包编译失败。' }
-Get-FileHash -LiteralPath (Join-Path $outputRoot 'output/轻仓WMS安装包-V1.3-安装升级通用-Windows-x64.exe') -Algorithm SHA256
+Get-FileHash -LiteralPath (Join-Path $outputRoot 'output/轻仓WMS安装包-V1.3.1-电脑版数量更新-Windows-x64.exe') -Algorithm SHA256

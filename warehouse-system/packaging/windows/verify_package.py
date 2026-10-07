@@ -69,7 +69,7 @@ def main():
     manifest = json.loads((root / 'package-manifest.json').read_text(encoding='utf-8'))
     for relative, digest in manifest['files'].items():
         assert hashlib.sha256((root / relative).read_bytes()).hexdigest() == digest, relative
-    expected_revision = '0015' if manifest['version'] == '1.3.0' else '0014'
+    expected_revision = '0015' if manifest['version'] in ('1.3.0','1.3.1') else '0014'
     report = {'checks': ['package file hashes verified'], 'business_baseline': manifest['business_baseline']}
     credentials = {'username': 'installadmin', 'password': '安装验收密码' + secrets.token_urlsafe(24)}
     controller = None
