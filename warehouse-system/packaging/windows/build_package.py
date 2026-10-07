@@ -62,7 +62,7 @@ def main():
     shutil.copy2(args.redist, target / 'VC_redist.x64.exe')
     compiler = Path(__import__('os').environ['WINDIR']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
     subprocess.run([str(compiler), '/nologo', '/utf8output', '/target:winexe', '/platform:x64', '/optimize+',
-                    '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
+                    '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/win32icon:' + str(source/'assets/wms.ico'),
                     '/reference:System.Web.Extensions.dll', '/out:' + str(target / '轻仓WMS.exe'),
                     str(source / 'Client.cs')], check=True)
     manifest = {}

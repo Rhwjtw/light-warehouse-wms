@@ -34,6 +34,8 @@ try {
 & $pythonExe (Join-Path $PSScriptRoot 'build_package.py') --output (Join-Path $outputRoot 'payload') `
     --frontend (Join-Path $outputRoot 'frontend/dist') --mysql $MySqlBase --redist $VCRedist --baseline $baseline
 if ($LASTEXITCODE -ne 0) { throw '运行组件打包失败。' }
-& $InnoCompiler (('/DPayload=' + (Join-Path $outputRoot 'payload'))) (('/DOutput=' + (Join-Path $outputRoot 'output'))) (Join-Path $PSScriptRoot 'installer.iss')
+& $pythonExe (Join-Path $PSScriptRoot 'build_upgrade.py') --output (Join-Path $outputRoot 'upgrade-payload') --from-package (Join-Path $outputRoot 'payload') --baseline $baseline
+if ($LASTEXITCODE -ne 0) { throw '升级组件打包失败。' }
+& $InnoCompiler (('/DPayload=' + (Join-Path $outputRoot 'payload'))) (('/DPayloadZip=' + (Join-Path $outputRoot 'wms-upgrade.zip'))) (('/DOutput=' + (Join-Path $outputRoot 'output'))) (Join-Path $PSScriptRoot 'installer.iss')
 if ($LASTEXITCODE -ne 0) { throw '安装包编译失败。' }
-Get-FileHash -LiteralPath (Join-Path $outputRoot 'output/轻仓WMS安装包-V1.3-Windows-x64.exe') -Algorithm SHA256
+Get-FileHash -LiteralPath (Join-Path $outputRoot 'output/轻仓WMS安装包-V1.3-安装升级通用-Windows-x64.exe') -Algorithm SHA256

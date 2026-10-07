@@ -28,7 +28,7 @@ internal class Client : Form
     readonly NotifyIcon tray = new NotifyIcon { Icon=SystemIcons.Application, Text="轻仓 WMS 独立版" };
     Process controller;
     string url;
-    bool working, exiting;
+    bool working, exiting, startupError;
 
     [STAThread]
     static void Main()
@@ -45,6 +45,7 @@ internal class Client : Form
     Client()
     {
         Text="轻仓 WMS · 独立运行"; ClientSize=new Size(576,290);
+        Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath); tray.Icon=Icon;
         StartPosition=FormStartPosition.CenterScreen; FormBorderStyle=FormBorderStyle.FixedDialog;
         MaximizeBox=false; Font=new Font("Microsoft YaHei UI",9);
         Controls.AddRange(new Control[] {status, username,password,confirm,start,open,backup,stop,
@@ -90,7 +91,7 @@ internal class Client : Form
             MessageBox.Show("请检查用户名、密码长度和两次输入。密码至少 14 位，且不能包含用户名。",Text); return;
         }
         try {
-            working=true; start.Enabled=false; stop.Enabled=false;
+            working=true; startupError=false; start.Enabled=false; stop.Enabled=false;
             status.Text="正在启动，请稍候…";
             ProcessStartInfo info=new ProcessStartInfo(Path.Combine(root,"python","python.exe"),
                 "-I \""+Path.Combine(root,"controller","runtime.py")+"\" run \""+Path.Combine(root,"data")+"\"");
@@ -103,7 +104,7 @@ internal class Client : Form
             controller.ErrorDataReceived += (s,e) => {};
             controller.Exited += (s,e) => SafeUI(()=>{
                 working=false; start.Enabled=true; stop.Enabled=true; open.Enabled=backup.Enabled=false;
-                if(!exiting) status.Text="系统已停止。数据保留在安装目录的 data 文件夹。";
+                if(!exiting && !startupError) status.Text="系统已停止。数据保留在安装目录的 data 文件夹。";
             });
             controller.Start(); controller.BeginOutputReadLine(); controller.BeginErrorReadLine();
             controller.StandardInput.WriteLine(AsciiJson(json.Serialize(new {username=username.Text.Trim(),password=password.Text})));
@@ -149,6 +150,7 @@ internal class Client : Form
                 MessageBox.Show("备份文件：\n"+Convert.ToString(values["path"])+"\n\n对应 SHA256 校验文件已同时生成。",Text);
             }
             if(kind=="error") {
+                startupError=true;
                 backup.Enabled=url != null;
                 status.Text=Convert.ToString(values["message"])+"\n错误类型："+Convert.ToString(values["error"]);
                 MessageBox.Show(status.Text,Text,MessageBoxButtons.OK,MessageBoxIcon.Warning);

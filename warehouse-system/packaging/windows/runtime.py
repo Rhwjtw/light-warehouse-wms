@@ -354,6 +354,11 @@ if __name__ == '__main__':
         main()
     except Exception as exc:
         frames = traceback.extract_tb(exc.__traceback__)
-        event('error', message='系统启动或停止失败，请查看安装目录 data 中的日志；不会覆盖已有数据库。',
-              error=type(exc).__name__, location=' <- '.join(f'{Path(f.filename).name}:{f.lineno}' for f in frames[-4:]))
+        message = '系统启动或停止失败，请查看安装目录data中的日志；原数据保留。'
+        if isinstance(exc, RuntimeError) and str(exc) == 'UPGRADE_INCOMPLETE_DATA_PRESERVED':
+            message = '检测到上次安装升级未完成。请重新运行最新完整安装包，程序会核验并尝试继续；原数据保留。'
+        elif isinstance(exc, RuntimeError) and str(exc) == 'DATABASE_UPGRADE_REQUIRED':
+            message = '程序与数据库版本尚未匹配，请运行最新完整安装包完成升级；原数据保留。'
+        event('error', message=message, error=type(exc).__name__,
+              location=' <- '.join(f'{Path(f.filename).name}:{f.lineno}' for f in frames[-4:]))
         sys.exit(1)
