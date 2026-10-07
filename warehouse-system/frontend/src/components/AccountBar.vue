@@ -5,17 +5,18 @@ import { ElMessage } from 'element-plus'
 import { Key, SwitchButton } from '@element-plus/icons-vue'
 import { auth, clearAuth, logout } from '../auth'
 import { api } from '../api'
+import { clearMobileSession } from '../mobile/session'
 const router = useRouter(), dialog = ref(false), saving = ref(false), error = ref('')
 const form = reactive({ current_password: '', new_password: '', confirm: '' })
 function reset() { Object.assign(form, { current_password: '', new_password: '', confirm: '' }); error.value = '' }
-async function signOut() { try { await logout() } catch (e) { ElMessage.warning(e.message) } finally { router.replace('/login') } }
+async function signOut() { clearMobileSession(auth.user?.id); try { await logout() } catch (e) { ElMessage.warning(e.message) } finally { router.replace('/login') } }
 async function save() {
   if (saving.value) return
   if (!form.current_password || form.new_password.length < 10 || form.new_password.length > 128 || form.new_password !== form.confirm) { error.value = '请填写原密码，新密码需 10～128 位且两次输入一致'; return }
   saving.value = true; error.value = ''
   try {
     await api.post('/auth/password', { current_password: form.current_password, new_password: form.new_password })
-    dialog.value = false; clearAuth(); ElMessage.success('密码已修改，请重新登录'); router.replace('/login')
+    dialog.value = false; clearMobileSession(auth.user?.id); clearAuth(); ElMessage.success('密码已修改，请重新登录'); router.replace('/login')
   } catch (e) { error.value = e.message } finally { saving.value = false }
 }
 </script>

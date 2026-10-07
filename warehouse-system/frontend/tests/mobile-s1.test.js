@@ -11,7 +11,7 @@ function component(name, dependencies, exported) {
   const body = descriptor.scriptSetup.content.replace(/^import .*$/gm, '') + `\nreturn {${exported}}`
   return new Function(...Object.keys(dependencies), body)(...Object.values(dependencies))
 }
-const base = { computed, reactive, ref, onMounted() {}, onBeforeUnmount() {}, Box: null, Download: null, List: null, Search: null, Switch: null, Upload: null }
+const base = { computed, reactive, ref, onMounted() {}, onBeforeUnmount() {}, auth: { user: { id: 1 } }, clearMobileSession() {}, Box: null, Download: null, List: null, Search: null, Switch: null, Upload: null }
 
 test('mobile deep links and expiry return to mobile login; desktop keeps its login', () => {
   assert.deepEqual(loginLocation({meta:{mobile:true},fullPath:'/m/account?source=home'}), {path:'/m/login',query:{redirect:'/m/account?source=home'}})

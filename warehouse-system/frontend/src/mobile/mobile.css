@@ -61,3 +61,13 @@
 .mobile-login .mobile-form + p { margin-top: 20px; }
 .mobile-login footer { margin-bottom: auto; text-align: center; }
 .mobile-text-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 12px; font-size: 14px; }
+.mobile-back { border: 0; padding: 0 4px; background: transparent; color: #2563eb; font-family: inherit; }
+.mobile-warning { padding: 12px; border-radius: 10px; background: #fff7e6; color: #92400e; font-size: 14px; }
+.mobile-root select, .mobile-root textarea { width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 16px; background: #fff; color: #0f172a; font-family: inherit; }
+.mobile-row { display: flex; gap: 12px; }
+.mobile-filter-panel { margin-top: 16px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+.mobile-select-label { display: block; margin-top: 16px; }
+.mobile-keyboard .mobile-nav { display: none; }
+.mobile-root .mobile-content { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px) + var(--mobile-keyboard-inset, 0px)); }
+.mobile-task .mobile-content { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px) + var(--mobile-keyboard-inset, 0px)); }
+.mobile-root input, .mobile-root textarea, .mobile-root select, .mobile-root [data-mobile-anchor] { scroll-margin-top: 80px; scroll-margin-bottom: 24px; }

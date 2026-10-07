@@ -24,7 +24,7 @@ export function mobileLoginTarget(value) {
   if (typeof value !== 'string' || value.includes('\\') || /[\u0000-\u001f]/.test(value)) return '/m'
   const path = value.split(/[?#]/)[0]
   const paths = [...mobileNavigation.map(item => item.path), '/m/account/password', ...mobileActions.map(item => item.path)]
-  return paths.includes(path) ? value : '/m'
+  return paths.includes(path) || path === '/m/state-lab' || /^\/m\/state-lab\/[\w-]{1,80}\/(form|confirm|result|context)$/.test(path) ? value : '/m'
 }
 
 export function loginLocation(route) {
@@ -43,6 +43,8 @@ export const mobileRoutes = [
       { path: 'records', component: pending, meta: { title: '记录', mobileTab: '/m/records', mobileParent: '/m', stage: 'S3', pendingLabel: '单据与流水查询' } },
       { path: 'account', component: () => import('./MobileAccount.vue'), meta: { title: '我的', mobileTab: '/m/account', mobileParent: '/m' } },
       { path: 'account/password', component: () => import('./MobilePassword.vue'), meta: { title: '修改密码', mobileParent: '/m/account', mobileTask: true } },
+      { path: 'state-lab', component: () => import('./MobileStateLab.vue'), meta: { title: 'S2 状态演练', mobileParent: '/m/jobs', mobileList: true, mobileTask: true } },
+      { path: 'state-lab/:jobId([\\w-]{1,80})/:step(form|confirm|result|context)', component: () => import('./MobileTaskLab.vue'), meta: { title: 'S2 演练作业', mobileParent: '/m/state-lab', mobileTask: true, mobileLabTask: true } },
       ...mobileActions.filter(item => item.key !== 'inventory').map(item => ({
         path: `jobs/${item.key}`, component: pending,
         meta: { title: item.label, mobileParent: '/m/jobs', mobileTask: true, stage: item.stage },

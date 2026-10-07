@@ -1,7 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { nextTick } from 'vue'
 import { canAccess } from './permissions'
 import { auth, restoreAuth } from './auth'
 import { mobileRoutes, loginLocation } from './mobile/routes'
+import { mobileStore, touchMobile } from './mobile/session'
+import { completedTaskLocation } from './mobile/navigation'
 
 const Dashboard = () => import('./views/Dashboard.vue')
 const Expiry = () => import('./views/Expiry.vue')
@@ -31,6 +34,18 @@ export const menuGroups = [
 
 const router = createRouter({
   history: createWebHistory(),
+  async scrollBehavior(to, from, saved) {
+    if (!to.meta.mobile) return saved || false
+    await nextTick()
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    if (to.meta.mobileList) {
+      const position = mobileStore()?.list(to.fullPath)
+      const anchor = position?.anchor && document.getElementById(position.anchor)
+      if (anchor) return { el: anchor, top: 80 }
+      if (position?.top) return { top: position.top }
+    }
+    return saved || { top: 0 }
+  },
   routes: [
     ...mobileRoutes,
     { path: '/login', component: Login, meta: { title: '登录', public: true } },
@@ -42,12 +57,23 @@ const router = createRouter({
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
-router.beforeEach(async to => {
+router.beforeEach(async (to, from) => {
+  if (from.meta.mobile && from.fullPath !== to.fullPath) window.dispatchEvent(new Event('wms-mobile-stop-resources'))
+  if (from.meta.mobileList) {
+    const anchor = [...document.querySelectorAll('[data-mobile-anchor]')].find(element => element.getBoundingClientRect().bottom > 80)
+    mobileStore()?.saveList(from.fullPath, { top: window.scrollY, anchor: anchor?.id })
+  }
+  if (from.fullPath !== to.fullPath && from.meta.mobileLabTask) { mobileStore()?.suspend(); touchMobile() }
   // 页面守卫确认登录态；写入权限由页面按钮和服务端接口分别检查。
   if (to.meta.public) return true
   try {
     if (!await restoreAuth()) return loginLocation(to)
     if (!canAccess(auth.user.role, to.meta.resource)) return '/'
+    if (to.meta.mobileLabTask) {
+      const task = mobileStore()?.get(to.params.jobId)
+      const completed = completedTaskLocation(to, task)
+      if (completed) return completed
+    }
   } catch { return loginLocation(to) }
 })
 window.addEventListener('wms-auth-expired', () => {

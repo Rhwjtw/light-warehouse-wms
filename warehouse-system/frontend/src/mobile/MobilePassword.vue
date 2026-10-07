@@ -3,6 +3,8 @@ import { onBeforeUnmount, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { clearAuth } from '../auth'
+import { auth } from '../auth'
+import { clearMobileSession } from './session'
 const router = useRouter(), saving = ref(false), error = ref('')
 const form = reactive({ current_password: '', new_password: '', confirm: '' })
 function reset() { Object.assign(form, { current_password: '', new_password: '', confirm: '' }) }
@@ -16,7 +18,7 @@ async function save() {
   saving.value = true
   try {
     await api.post('/auth/password', { current_password: form.current_password, new_password: form.new_password })
-    reset(); clearAuth(); await router.replace({ path: '/m/login', query: { redirect: '/m/account', status: 'password-changed' } })
+    reset(); clearMobileSession(auth.user?.id); clearAuth(); await router.replace({ path: '/m/login', query: { redirect: '/m/account', status: 'password-changed' } })
   } catch (e) { error.value = e.message } finally { saving.value = false }
 }
 </script>
