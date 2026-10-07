@@ -22,7 +22,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', syncViewport))
 </script>
 
 <template>
-  <router-view v-if="route.meta.public" v-slot="{ Component }"><transition name="page"><component :is="Component" /></transition></router-view>
+  <router-view v-if="route.meta.mobile" />
+  <router-view v-else-if="route.meta.public" v-slot="{ Component }"><transition name="page"><component :is="Component" /></transition></router-view>
   <el-container v-else class="app-shell">
     <el-aside :width="collapsed ? '76px' : '232px'" :class="['sidebar', { 'is-collapsed': collapsed }]">
       <div class="brand"><span class="brand-icon">仓</span><div class="brand-copy">轻仓 WMS<small>仓库 · 生产 · 领料</small></div></div>

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { canAccess } from './permissions'
 import { auth, restoreAuth } from './auth'
+import { mobileRoutes, loginLocation } from './mobile/routes'
 
 const Dashboard = () => import('./views/Dashboard.vue')
 const Expiry = () => import('./views/Expiry.vue')
@@ -31,6 +32,7 @@ export const menuGroups = [
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    ...mobileRoutes,
     { path: '/login', component: Login, meta: { title: '登录', public: true } },
     { path: '/', component: Dashboard, meta: { title: '首页' } },
     ...menuGroups.flatMap(group => group.items.map(([path, label]) => ({
@@ -44,9 +46,12 @@ router.beforeEach(async to => {
   // 页面守卫确认登录态；写入权限由页面按钮和服务端接口分别检查。
   if (to.meta.public) return true
   try {
-    if (!await restoreAuth()) return { path: '/login', query: { redirect: to.fullPath } }
+    if (!await restoreAuth()) return loginLocation(to)
     if (!canAccess(auth.user.role, to.meta.resource)) return '/'
-  } catch { return { path: '/login', query: { redirect: to.fullPath } } }
+  } catch { return loginLocation(to) }
 })
-window.addEventListener('wms-auth-expired', () => { if (router.currentRoute.value.path !== '/login') router.replace('/login') })
+window.addEventListener('wms-auth-expired', () => {
+  const current = router.currentRoute.value
+  if (!current.meta.public) router.replace(loginLocation(current))
+})
 export default router
