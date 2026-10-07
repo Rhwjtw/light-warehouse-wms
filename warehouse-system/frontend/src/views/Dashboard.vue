@@ -1,4 +1,5 @@
 <script setup>
+import { formatQuantity } from '../quantity'
 import { computed, onMounted, ref } from 'vue'
 import { Box, Download, Files, Finished, Goods, Plus, Refresh, Upload, Warning, ArrowRight } from '@element-plus/icons-vue'
 import { api } from '../api'
@@ -51,7 +52,7 @@ const attention = computed(() => data.value ? [
 // 今日变动由后端按实际记账时间和单位聚合；前端只格式化，绝不混加 kg、L、个。
 function todayText(key) {
   const values = data.value?.today?.[key] || []
-  return values.length ? values.map(row => `${row.quantity} ${row.unit}`).join(' / ') : '0'
+  return values.length ? values.map(row => `${formatQuantity(row.quantity)} ${row.unit}`).join(' / ') : '0'
 }
 function statusTone(value) { return ({ ready: 'warning', in_progress: 'primary', completed: 'success', received: 'success', cancelled: 'info' })[value] || 'info' }
 function transactionTone(value) { return ['material_receipt', 'return', 'finished_receipt'].includes(value) ? 'success' : 'primary' }
@@ -115,8 +116,8 @@ onMounted(refresh)
             <span class="dashboard-order-icon"><el-icon><Files /></el-icon></span>
             <div class="dashboard-order-copy">
               <h3>{{ order.product_name }}</h3>
-              <p>{{ order.order_no }} · 计划 {{ order.planned_quantity }} {{ order.unit }}</p>
-              <p class="dashboard-order-meta">实际 {{ order.actual_quantity == null ? '—' : `${order.actual_quantity} ${order.unit}` }} · {{ dateTime(order.created_at, data.timezone) }}</p>
+              <p>{{ order.order_no }} · 计划 {{ formatQuantity(order.planned_quantity) }} {{ order.unit }}</p>
+              <p class="dashboard-order-meta">实际 {{ order.actual_quantity == null ? '—' : `${formatQuantity(order.actual_quantity)} ${order.unit}` }} · {{ dateTime(order.created_at, data.timezone) }}</p>
             </div>
             <div class="dashboard-order-actions">
               <StatusBadge :tone="statusTone(order.status)" :label="statusNames[order.status] || order.status" />
@@ -148,7 +149,7 @@ onMounted(refresh)
             <el-table-column prop="name" label="物料 / 成品" min-width="170" show-overflow-tooltip />
             <el-table-column prop="code" label="编码" min-width="110" show-overflow-tooltip />
             <el-table-column prop="category" label="类别" width="100" />
-            <el-table-column label="当前库存" min-width="140" align="right" show-overflow-tooltip><template #default="{row}"><strong class="data-value">{{ row.quantity }}</strong></template></el-table-column>
+            <el-table-column label="当前库存" min-width="140" align="right" show-overflow-tooltip><template #default="{row}"><strong class="data-value">{{ formatQuantity(row.quantity) }}</strong></template></el-table-column>
             <el-table-column prop="unit" label="单位" min-width="85" />
             <template #empty><EmptyState :title="materialStockError || finishedStockError ? '库存数据未加载' : '暂无库存档案'" description="可查看全部库存档案，或刷新重试。" /></template>
           </el-table>
@@ -167,7 +168,7 @@ onMounted(refresh)
               <el-table-column label="记账时间" min-width="175"><template #default="{row}">{{ dateTime(row.created_at, data.timezone) }}</template></el-table-column>
               <el-table-column prop="name" label="原材料 / 成品" min-width="145" show-overflow-tooltip />
               <el-table-column label="类型" width="125"><template #default="{row}"><StatusBadge :tone="transactionTone(row.kind)" :label="kindNames[row.kind] || row.kind" /></template></el-table-column>
-              <el-table-column label="变动量" min-width="145" align="right" show-overflow-tooltip><template #default="{row}"><span class="data-value">{{ row.change_quantity }} {{ row.unit }}</span></template></el-table-column>
+              <el-table-column label="变动量" min-width="145" align="right" show-overflow-tooltip><template #default="{row}"><span class="data-value">{{ formatQuantity(row.change_quantity) }} {{ row.unit }}</span></template></el-table-column>
               <el-table-column prop="document_no" label="单据号" min-width="190" />
               <el-table-column prop="operator" label="操作人" min-width="110" />
               <template #empty><EmptyState title="暂无库存流水" description="完成入库、出库或生产用料后将在这里显示。" /></template>

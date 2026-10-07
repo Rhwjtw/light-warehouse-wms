@@ -1,4 +1,5 @@
 <script setup>
+import { formatQuantity, quantityColumn } from '../quantity'
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -62,6 +63,7 @@ async function open(nextMode, row) {
     if (current !== resource.value) return
     Object.keys(form).forEach(key => delete form[key])
     Object.assign(form, Object.fromEntries(fields.value.map(f => [f.key, f.initial ?? ''])), { is_active: true, notes: '', ...data, password: '' })
+    if ('min_stock' in form) form.min_stock = formatQuantity(form.min_stock)
     unitChoice.value = form.unit || ''
     mode.value = nextMode; dialog.value = true
   } catch (e) { ElMessage.error(e.message) }
@@ -116,7 +118,7 @@ watch(resource, async () => {
     </el-form></FilterBar>
     <TableSkeleton v-if="loading && !rows.length" />
     <el-table v-else v-loading="loading" :data="rows" stripe row-key="id">
-      <el-table-column v-for="field in fields" :key="field.key" :prop="field.key === 'role_id' ? 'role_name' : field.key" :label="field.label" :min-width="field.key === 'unit' ? 75 : 145" show-overflow-tooltip />
+      <el-table-column v-for="field in fields" :key="field.key" :prop="field.key === 'role_id' ? 'role_name' : field.key" :label="field.label" :formatter="field.key === 'min_stock' ? quantityColumn : undefined" :min-width="field.key === 'unit' ? 75 : 145" show-overflow-tooltip />
       <el-table-column v-if="resource === 'locations'" prop="notes" label="备注" min-width="180" show-overflow-tooltip />
       <el-table-column v-if="resource === 'locations'" label="创建时间" min-width="175"><template #default="{ row }">{{ dateTime(row.created_at) }}</template></el-table-column>
       <el-table-column v-if="resource === 'locations'" label="更新时间" min-width="175"><template #default="{ row }">{{ dateTime(row.updated_at) }}</template></el-table-column>

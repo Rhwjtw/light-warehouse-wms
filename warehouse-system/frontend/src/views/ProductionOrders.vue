@@ -1,6 +1,6 @@
 <script setup>
 import { postingRequest } from '../postingRequest'
-import { quantityUnits, quantityText } from '../quantity'
+import { quantityUnits, quantityText, formatQuantity } from '../quantity'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -19,7 +19,7 @@ import TableSkeleton from '../components/ui/TableSkeleton.vue'
 import DocumentReversal from '../components/DocumentReversal.vue'
 
 const registerVisible = ref(false), registering = ref(false), registeredQuantity = ref(''), registerError = ref('')
-function openRegister() { registeredQuantity.value = current.value.actual_quantity || ''; registerError.value = ''; registerVisible.value = true }
+function openRegister() { registeredQuantity.value = formatQuantity(current.value.actual_quantity || ''); registerError.value = ''; registerVisible.value = true }
 async function registerActual() {
   registering.value = true; registerError.value = ''
   try {
@@ -31,7 +31,7 @@ const completeVisible = ref(false), completing = ref(false), settling = ref(fals
 const actualQuantity = ref(''), settlement = ref(null), settlementError = ref('')
 const finishedBatches = ref([]), materialDocumentOpen = ref(false), materialDocumentId = ref(null)
 function openComplete() {
-  actualQuantity.value = current.value?.actual_quantity || ''; settlement.value = null; settlementError.value = ''; completeVisible.value = true
+  actualQuantity.value = formatQuantity(current.value?.actual_quantity || ''); settlement.value = null; settlementError.value = ''; completeVisible.value = true
   finishedBatches.value = [{ batch_no: current.value.order_no, quantity: actualQuantity.value, expiry_date: '' }]
 }
 watch(actualQuantity, (quantity, previous) => {
@@ -95,7 +95,7 @@ const kindNames = { issue: '生产领料', supplement: '生产补料', return: '
 function dateTime(value) {
   return value ? new Date(value).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false }) : '—'
 }
-function amount(value, unit) { return `${value ?? '0'} ${unit || ''}` }
+function amount(value, unit) { return `${formatQuantity(value ?? '0')} ${unit || ''}` }
 function validQuantity(value) { return positiveDecimal.test(String(value)) && /[1-9]/.test(String(value)) }
 function requestId() { return crypto.randomUUID().replaceAll('-', '') }
 
@@ -286,8 +286,8 @@ onMounted(() => { load(); loadProducts() })
       <div class="preview-title">当前有效 BOM V{{ preview.bom_version }} · {{ amount(preview.planned_quantity, preview.finished_product_unit) }}</div>
       <el-table :data="preview.requirements" size="small">
         <el-table-column prop="material_name" label="原材料" />
-        <el-table-column label="单单位用量"><template #default="{row}">{{ row.quantity_per_unit }}{{ row.bom_unit }} / {{ preview.finished_product_unit }}</template></el-table-column>
-        <el-table-column label="计划理论需求"><template #default="{row}"><span class="data-value">{{ amount(row.suggested_quantity, row.suggested_unit) }}</span> <small>（{{ row.total_quantity }}{{ row.total_unit }}）</small></template></el-table-column>
+        <el-table-column label="单单位用量"><template #default="{row}">{{ formatQuantity(row.quantity_per_unit) }}{{ row.bom_unit }} / {{ preview.finished_product_unit }}</template></el-table-column>
+        <el-table-column label="计划理论需求"><template #default="{row}"><span class="data-value">{{ amount(row.suggested_quantity, row.suggested_unit) }}</span> <small>（{{ formatQuantity(row.total_quantity) }}{{ row.total_unit }}）</small></template></el-table-column>
       </el-table>
     </DataPanel>
     <template #footer><el-button @click="createVisible=false">取消</el-button><el-button type="primary" :loading="creating" @click="createOrder">创建生产单</el-button></template>
@@ -306,7 +306,7 @@ onMounted(() => { load(); loadProducts() })
         <h3>原材料需求与当前净领用</h3>
         <el-table :data="current.materials" border stripe row-key="id">
           <el-table-column prop="material_name" label="原材料" min-width="150" />
-          <el-table-column label="单位用量" min-width="135"><template #default="{row}">{{ row.quantity_per_unit }}{{ row.bom_unit }} / {{ current.finished_product_unit }}</template></el-table-column>
+          <el-table-column label="单位用量" min-width="135"><template #default="{row}">{{ formatQuantity(row.quantity_per_unit) }}{{ row.bom_unit }} / {{ current.finished_product_unit }}</template></el-table-column>
           <el-table-column label="计划理论需求" min-width="145"><template #default="{row}"><span class="data-value">{{ amount(row.planned_required_quantity, row.base_unit) }}</span></template></el-table-column>
           <el-table-column label="已领" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.issued_quantity, row.base_unit) }}</span></template></el-table-column>
           <el-table-column label="补料" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.supplemented_quantity, row.base_unit) }}</span></template></el-table-column>
@@ -336,7 +336,7 @@ onMounted(() => { load(); loadProducts() })
           <el-table-column prop="batch_no" label="批次" min-width="130" />
           <el-table-column prop="location_name" label="库位名称" min-width="130" />
           <el-table-column label="数量" min-width="105"><template #default="{row}">{{ amount(row.quantity, row.unit) }}</template></el-table-column>
-          <el-table-column label="库存变化" min-width="190"><template #default="{row}">{{ row.before_quantity }} → {{ row.after_quantity }} {{ row.unit }}</template></el-table-column>
+          <el-table-column label="库存变化" min-width="190"><template #default="{row}">{{ formatQuantity(row.before_quantity) }} → {{ formatQuantity(row.after_quantity) }} {{ row.unit }}</template></el-table-column>
           <el-table-column prop="operator_name" label="操作人" width="105" />
           <el-table-column prop="notes" label="备注" min-width="140" show-overflow-tooltip />
           <template #empty><EmptyState title="尚无物料操作" description="领料、补料或退料后将在这里显示批次记录。" /></template>
@@ -354,7 +354,7 @@ onMounted(() => { load(); loadProducts() })
     <el-button :disabled="completing" @click="finishedBatches.push({batch_no:'',quantity:'',expiry_date:''})">增加成品批次</el-button>
     <el-button :loading="settling" :disabled="completing" @click="previewSettlement">预览结算</el-button>
     <TableSkeleton v-if="settling" :rows="3" />
-    <template v-if="settlement"><el-alert class="settlement-notice" type="info" :closable="false" show-icon :title="`确认后成品入库 ${settlement.actual_quantity} ${settlement.finished_product_unit}，并冻结生产单。提交时系统会重新核对物料记录。`" /><SettlementTable :rows="settlement.materials" /></template>
+    <template v-if="settlement"><el-alert class="settlement-notice" type="info" :closable="false" show-icon :title="`确认后成品入库 ${formatQuantity(settlement.actual_quantity)} ${settlement.finished_product_unit}，并冻结生产单。提交时系统会重新核对物料记录。`" /><SettlementTable :rows="settlement.materials" /></template>
     <template #footer><el-button :disabled="completing" @click="completeVisible=false">取消</el-button><el-button type="primary" :disabled="!settlement || settling" :loading="completing" @click="finishProduction">确认完成</el-button></template>
   </el-dialog>
 

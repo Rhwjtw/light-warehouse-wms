@@ -1,4 +1,5 @@
 <script setup>
+import { formatQuantity } from '../quantity'
 import { onMounted, reactive, ref } from 'vue'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import { api } from '../api'
@@ -42,7 +43,7 @@ onMounted(() => load())
   <TableSkeleton v-if="loading && !rows.length" />
   <el-table v-else :data="rows" v-loading="loading" stripe row-key="id">
     <el-table-column prop="material_name" label="原材料" min-width="120" show-overflow-tooltip /><el-table-column prop="batch_no" label="批号" min-width="125" />
-    <el-table-column label="当前库存" min-width="130"><template #default="{row}"><span class="data-value">{{ row.remaining_quantity }} {{ row.unit }}</span></template></el-table-column>
+    <el-table-column label="当前库存" min-width="130"><template #default="{row}"><span class="data-value">{{ formatQuantity(row.remaining_quantity) }} {{ row.unit }}</span></template></el-table-column>
     <el-table-column prop="production_date" label="生产日期" width="110" /><el-table-column prop="expiry_date" label="到期日期" width="110" />
     <el-table-column label="剩余天数" width="85"><template #default="{row}"><span :class="['expiry-days', `expiry-days--${colors[row.status] || 'info'}`]">{{ row.days_remaining }}</span></template></el-table-column>
     <el-table-column label="状态" width="110"><template #default="{row}"><StatusBadge :tone="colors[row.status] || 'info'" :label="names[row.status] || row.status" /></template></el-table-column>

@@ -1,4 +1,5 @@
 <script setup>
+import { formatQuantity, quantityColumn } from '../quantity'
 import { computed, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -45,7 +46,7 @@ function display(row, key) {
   if (key.endsWith('_at')) return new Date(row[key]).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false })
   if (key === 'kind') return row[key] === 'finished_receipt' ? '成品入库' : row[key] === 'reversal' ? '冲销' : '成品出库'
   if (key === 'business_type') return row.kind === 'reversal' ? '库存冲销' : row[key] === 'production' ? '生产入库' : row.kind === 'finished_receipt' ? '普通入库' : '普通出库'
-  return row[key]
+  return isQuantityColumn(key) ? formatQuantity(row[key]) : row[key]
 }
 function isQuantityColumn(key) { return ['quantity', 'change_quantity', 'after_quantity', 'before_quantity'].includes(key) }
 async function searchProducts(query = '') {
@@ -130,20 +131,20 @@ watch(resource, async () => {
 
   <div v-if="error || success" class="feedback-stack">
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
-    <el-alert v-if="success" :title="`记账成功：${success.document_no}，${finishedPostingBalanceLabel(success)} ${success.after_quantity} ${success.unit}`" type="success" :closable="false" show-icon />
+    <el-alert v-if="success" :title="`记账成功：${success.document_no}，${finishedPostingBalanceLabel(success)} ${formatQuantity(success.after_quantity)} ${success.unit}`" type="success" :closable="false" show-icon />
   </div>
 
   <DataPanel v-if="!isStock && canWrite" :title="formTitle" :description="isReceipt ? '选择成品并填写数量，即可完成普通入库。' : '当前库存会实时显示，出库数量不能超过可用余额。'" kind="action">
     <el-form label-width="100px" :disabled="saving" @submit.prevent="submit">
       <el-row :gutter="20"><el-col :span="12"><el-form-item label="成品" required><el-select v-model="form.product_id" remote filterable :remote-method="searchProducts" placeholder="输入成品编码或名称搜索" @change="selectProduct"><el-option v-for="item in products" :key="item.id" :value="item.id" :label="`${item.code} · ${item.name}`" /></el-select></el-form-item></el-col>
-        <el-col :span="12"><el-form-item label="当前库存"><span :class="selected ? 'stock-reading' : 'muted-value'">{{ selecting ? '查询中…' : selected ? `${selected.quantity} ${selected.unit}` : '请先选择成品' }}</span></el-form-item></el-col></el-row>
+        <el-col :span="12"><el-form-item label="当前库存"><span :class="selected ? 'stock-reading' : 'muted-value'">{{ selecting ? '查询中…' : selected ? `${formatQuantity(selected.quantity)} ${selected.unit}` : '请先选择成品' }}</span></el-form-item></el-col></el-row>
       <el-row :gutter="20"><el-col :span="12"><el-form-item :label="isReceipt ? '入库数量' : '出库数量'" required><el-input v-model="form.quantity" inputmode="decimal" maxlength="21" placeholder="大于零，最多六位小数"><template #append>{{ selected?.unit || '单位' }}</template></el-input></el-form-item></el-col>
         <el-col :span="12"><el-form-item :label="isReceipt ? '入库日期' : '出库日期'" required><el-date-picker v-model="form.business_date" type="date" value-format="YYYY-MM-DD" /></el-form-item></el-col></el-row>
       <el-row :gutter="20"><el-col :span="12"><el-form-item :label="isReceipt ? '入库类型' : '出库类型'"><el-select v-model="form.business_type"><el-option value="normal" :label="isReceipt ? '普通入库' : '普通出库'" /><el-option v-if="isReceipt" value="production" label="生产入库（请从生产单完成）" disabled /></el-select></el-form-item></el-col>
         <el-col :span="12"><el-form-item label="关联单据"><el-input v-model="form.reference_no" maxlength="120" placeholder="可选，填写外部单据编号" /></el-form-item></el-col></el-row>
       <el-form-item label="备注"><el-input v-model="form.notes" maxlength="2000" type="textarea" :rows="2" /></el-form-item>
       <el-alert v-if="isReceipt" title="普通入库继续计入无批次归属库存；真实生产批次请从生产单完成创建。" type="info" :closable="false" />
-      <el-table v-if="!isReceipt && selected" :data="batchRows"><el-table-column prop="label" label="批次/库存归属" min-width="180" /><el-table-column prop="quantity" label="批次当前库存" /><el-table-column label="本次出库量"><template #default="{row}"><el-input v-model="row.outbound_quantity" inputmode="decimal" placeholder="不出库留空" /></template></el-table-column></el-table>
+      <el-table v-if="!isReceipt && selected" :data="batchRows"><el-table-column prop="label" label="批次/库存归属" min-width="180" /><el-table-column prop="quantity" :formatter="quantityColumn" label="批次当前库存" /><el-table-column label="本次出库量"><template #default="{row}"><el-input v-model="row.outbound_quantity" inputmode="decimal" placeholder="不出库留空" /></template></el-table-column></el-table>
       <el-form-item><el-button type="primary" size="large" native-type="submit" :loading="saving" :disabled="selecting || !selected">{{ isReceipt ? '确认入库' : '确认出库' }}</el-button></el-form-item>
     </el-form>
   </DataPanel>
@@ -160,7 +161,7 @@ watch(resource, async () => {
   </DataPanel>
 
   <DocumentReversal v-model="detailOpen" :document-id="detailId" @changed="load(); selectProduct()" />
-  <el-dialog v-model="batchOpen" title="成品库存批次明细" width="760px"><el-alert title="历史无批次归属库存与真实批次分别保存，不反推历史来源。" type="info" :closable="false" /><el-table :data="batchRows"><el-table-column prop="label" label="批次/库存归属" min-width="180" /><el-table-column prop="quantity" label="当前库存" /><el-table-column prop="unit" label="单位" /><el-table-column prop="production_date" label="生产日期" /></el-table></el-dialog>
+  <el-dialog v-model="batchOpen" title="成品库存批次明细" width="760px"><el-alert title="历史无批次归属库存与真实批次分别保存，不反推历史来源。" type="info" :closable="false" /><el-table :data="batchRows"><el-table-column prop="label" label="批次/库存归属" min-width="180" /><el-table-column prop="quantity" :formatter="quantityColumn" label="当前库存" /><el-table-column prop="unit" label="单位" /><el-table-column prop="production_date" label="生产日期" /></el-table></el-dialog>
 </template>
 
 <style scoped>

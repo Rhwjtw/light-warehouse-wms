@@ -1,4 +1,5 @@
 <script setup>
+import { formatQuantity } from '../quantity'
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox, ElRadioGroup, ElRadioButton } from 'element-plus'
@@ -63,7 +64,7 @@ function display(row, key) {
   if (key === 'kind') return ({ material_receipt: '原料入库', material_outbound: '原料出库', issue: '生产领料', supplement: '生产补料', return: '生产退料', putaway: '上架', transfer: '移库', count_gain: '盘盈', count_loss: '盘亏', adjustment: '库存调整', reversal: '冲销' })[row[key]] || row[key]
   if (key === 'status') return ({ pending: '待上架', partial: '部分上架', shelved: '已上架', reversed: '已冲销' })[row[key]] || row[key]
   if (key === 'created_at') return new Date(row[key]).toLocaleString('zh-CN', { timeZone: auth.user?.business_timezone || 'Asia/Shanghai', hour12: false })
-  return row[key]
+  return isQuantityColumn(key) ? formatQuantity(row[key]) : row[key]
 }
 function isQuantityColumn(key) { return ['received_quantity', 'remaining_quantity', 'shelved_quantity', 'pending_quantity', 'input_quantity', 'before_quantity', 'change_quantity', 'after_quantity'].includes(key) }
 const optionGeneration = {}
@@ -129,7 +130,7 @@ async function submit() {
     if (outbound.value && form.purpose !== 'normal') {
       const batch = candidates.value.find(row => row.id === form.batch_id)
       try {
-        await ElMessageBox.confirm(`确认${purposeNames[form.purpose]}：${batch?.batch_no || ''}，${form.quantity} ${form.unit}？${form.purpose === 'supplier_return' ? '退回该批次原供应商：' + (batch?.supplier_name || '') + '。' : ''}确认后扣减库存并记录原因。`, '确认原料出库', {type:'warning'})
+        await ElMessageBox.confirm(`确认${purposeNames[form.purpose]}：${batch?.batch_no || ''}，${formatQuantity(form.quantity)} ${form.unit}？${form.purpose === 'supplier_return' ? '退回该批次原供应商：' + (batch?.supplier_name || '') + '。' : ''}确认后扣减库存并记录原因。`, '确认原料出库', {type:'warning'})
       } catch { return }
     }
     const result = await api.post('/' + resource.value, { ...payload, request_id: requestId })
@@ -159,7 +160,7 @@ watch(resource, async () => {
 
   <div v-if="error || success" class="feedback-stack">
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
-    <el-alert v-if="success" type="success" :closable="false" show-icon :title="receipt ? `入库单 ${success.document_no} 已创建，待上架 ${success.after_quantity} ${success.unit}` : `已记账：${success.document_no}，批次余额 ${success.after_quantity} ${success.unit}`" />
+    <el-alert v-if="success" type="success" :closable="false" show-icon :title="receipt ? `入库单 ${success.document_no} 已创建，待上架 ${formatQuantity(success.after_quantity)} ${success.unit}` : `已记账：${success.document_no}，批次余额 ${formatQuantity(success.after_quantity)} ${success.unit}`" />
   </div>
 
   <DataPanel v-if="writePage && canWrite" :title="panelTitle" :description="receipt ? '入库后形成待上架数量，在上架页面选择实际库位。' : '默认推荐最早到期的可用批次，也可选择其他合法批次。'" kind="action">
@@ -173,7 +174,7 @@ watch(resource, async () => {
       <template v-if="outbound">
         <el-form-item label="出库用途" required><el-radio-group v-model="form.purpose" @change="purposeChanged"><el-radio-button value="normal">普通出库</el-radio-button><el-radio-button value="supplier_return">供应商退货</el-radio-button><el-radio-button value="scrap">报废</el-radio-button></el-radio-group></el-form-item>
         <el-alert :title="form.purpose === 'normal' ? '普通出库只使用未过期的已上架批次；到期当天仍有效。' : form.purpose === 'supplier_return' ? '退回所选批次原供应商；允许退回过期批次，必须填写退货原因。' : '报废扣减所选库位批次库存；允许处理过期批次，必须填写报废原因。'" :type="form.purpose === 'normal' ? 'info' : 'warning'" :closable="false" class="form-notice" />
-        <el-form-item label="出库批次" required><el-select v-model="form.batch_id" placeholder="先选择原材料"><el-option v-for="(b,i) in candidates" :key="b.id" :value="b.id" :label="`${candidatePage === 1 && i === 0 ? '推荐 · ' : ''}${b.batch_no} · ${b.expired ? '已过期 · ' : ''}到期 ${b.expiry_date} · 余额 ${b.remaining_quantity} ${b.unit} · ${b.location_name} · ${b.supplier_name}`" /></el-select></el-form-item>
+        <el-form-item label="出库批次" required><el-select v-model="form.batch_id" placeholder="先选择原材料"><el-option v-for="(b,i) in candidates" :key="b.id" :value="b.id" :label="`${candidatePage === 1 && i === 0 ? '推荐 · ' : ''}${b.batch_no} · ${b.expired ? '已过期 · ' : ''}到期 ${b.expiry_date} · 余额 ${formatQuantity(b.remaining_quantity)} ${b.unit} · ${b.location_name} · ${b.supplier_name}`" /></el-select></el-form-item>
         <el-pagination v-if="candidateTotal > 20" v-model:current-page="candidatePage" :total="candidateTotal" :page-size="20" layout="prev, pager, next" @current-change="form.batch_id=null; loadBatches(false)" />
         <EmptyState v-if="form.material_id && !candidateTotal" title="暂无可用批次" description="请先入库，或核查批次有效期与相关档案状态。" />
       </template>

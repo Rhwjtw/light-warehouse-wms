@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { parse } from '@vue/compiler-sfc'
 import { computed, reactive, ref } from 'vue'
+import { formatQuantity } from '../src/quantity.js'
 import { canOperate } from '../src/permissions.js'
 
 const descriptor = parse(readFileSync(new URL('../src/views/MaterialInventory.vue', import.meta.url), 'utf8')).descriptor
@@ -17,9 +18,9 @@ function component({cancel=false,fail=false}={}) {
     },
     async post(url,payload) {sent.push({url,payload}); if(fail) throw new Error('network'); return {data:{document_no:'TEST-11'}}},
   }
-  const state = new Function('computed','reactive','ref','watch','useRoute','auth','canOperate','api','ElMessage','ElMessageBox','crypto',body)(
+  const state = new Function('computed','reactive','ref','watch','useRoute','auth','canOperate','api','ElMessage','ElMessageBox','crypto','formatQuantity',body)(
     computed,reactive,ref,()=>{},()=>({meta:{resource:'material-outbounds'}}),{user:{role:'warehouse'}},canOperate,api,{success(){}},
-    {async confirm(text){confirmations.push(text); if(cancel) throw new Error('cancel')}},{randomUUID:()=>`key-${++sequence}`})
+    {async confirm(text){confirmations.push(text); if(cancel) throw new Error('cancel')}},{randomUUID:()=>`key-${++sequence}`},formatQuantity)
   Object.assign(state.form,{material_id:7,batch_id:11,quantity:'2',notes:'破损',purpose:'scrap'})
   state.candidates.value=[{id:11,batch_no:'B-11',supplier_name:'原供应商'}]
   return {state,sent,queries,confirmations}
@@ -40,6 +41,13 @@ test('canceling supplier return confirmation never posts or clears input',async(
   state.form.purpose='supplier_return'; await state.submit()
   assert.equal(sent.length,0); assert.equal(state.form.quantity,'2'); assert.equal(state.saving.value,false)
   assert.match(confirmations[0],/原供应商/)
+})
+
+test('confirmation trims decimal padding while the request retains the entered quantity',async()=>{
+  const {state,sent,confirmations}=component()
+  state.form.quantity='2.500000'; await state.submit()
+  assert.match(confirmations[0],/2\.5 kg/)
+  assert.equal(sent[0].payload.quantity,'2.500000')
 })
 
 test('purpose switch reloads candidate rules and failed requests reuse keys',async()=>{

@@ -1,4 +1,5 @@
 <script setup>
+import { formatQuantity } from '../quantity'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
@@ -84,7 +85,7 @@ async function open(nextMode, row = null) {
       materials.value = mergeById(materials.value, data.items.map(item => ({ id: item.material_id, code: item.material_code, name: item.material_name, unit: item.material_stock_unit })))
       Object.assign(form, { id: data.id, product_id: data.product_id, product_unit: data.product_unit,
         version: data.version, status: data.status, notes: data.notes || '',
-        items: data.items.map(item => ({ material_id: item.material_id, quantity_per_unit: item.quantity_per_unit, unit: item.unit, notes: item.notes || '' })) })
+        items: data.items.map(item => ({ material_id: item.material_id, quantity_per_unit: formatQuantity(item.quantity_per_unit), unit: item.unit, notes: item.notes || '' })) })
     } else {
       Object.assign(form, { id: null, product_id: null, product_unit: '', version: 1, status: 'draft', notes: '', items: [] })
       addItem()
@@ -154,7 +155,7 @@ async function calculate() {
   } catch (error) { previewError.value = error.message }
   finally { previewLoading.value = false }
 }
-function quantityText(quantity, unit) { return `${quantity}${unit}` }
+function quantityText(quantity, unit) { return `${formatQuantity(quantity)}${unit}` }
 
 onMounted(async () => {
   try {

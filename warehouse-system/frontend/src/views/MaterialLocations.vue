@@ -6,7 +6,7 @@ import { Refresh, Search } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { auth } from '../auth'
 import { canOperate } from '../permissions'
-import { quantityUnits, quantityText } from '../quantity'
+import { quantityUnits, quantityText, formatQuantity, quantityColumn } from '../quantity'
 import { postingRequest } from '../postingRequest'
 import PageHeader from '../components/ui/PageHeader.vue'
 import DataPanel from '../components/ui/DataPanel.vue'
@@ -35,7 +35,7 @@ function positive(value) { try { return quantityUnits(value) > 0n } catch { retu
 function nonnegative(value) { try { return quantityUnits(value) >= 0n } catch { return false } }
 function statusText(value) { return ({ pending: '待上架', partial: '部分上架', shelved: '已上架' })[value] || value }
 function kindText(value) { return ({ material_receipt: '原材料入库', material_outbound: '原材料出库', putaway: '上架', transfer: '移库', issue: '车间领料', supplement: '补料', return: '退料', count_gain: '盘盈', count_loss: '盘亏', adjustment: '库存调整', reversal: '冲销' })[value] || value }
-function formatted(value, unit) { return `${value} ${unit || ''}` }
+function formatted(value, unit) { return `${formatQuantity(value)} ${unit || ''}` }
 
 async function loadOptions() {
   try {
@@ -82,7 +82,7 @@ async function openAction(type, row = null) {
   actionType.value = type; selected.value = row
   Object.assign(action, { source_batch_id: null, location_id: null, quantity: '', actual_quantity: '', change_quantity: '', reason: '', notes: '', requestKey: '', requestContent: '' })
   if (type !== 'putaway') await loadStockOptions()
-  if (type === 'count' && row) action.actual_quantity = row.remaining_quantity
+  if (type === 'count' && row) action.actual_quantity = formatQuantity(row.remaining_quantity)
   actionVisible.value = true; error.value = ''
 }
 function selectedStock() { return selected.value || stockOptions.value.find(row => row.id === action.source_batch_id) }
@@ -97,7 +97,7 @@ async function submitAction() {
     path = '/material-putaways'
     payload = { receipt_movement_id: row.receipt_movement_id, location_id: action.location_id,
       quantity: action.quantity, notes: action.notes || null }
-    confirmation = `确认将 ${row.material_name} / ${row.batch_no} 的 ${action.quantity} ${row.unit} 上架？`
+    confirmation = `确认将 ${row.material_name} / ${row.batch_no} 的 ${formatQuantity(action.quantity)} ${row.unit} 上架？`
   } else if (actionType.value === 'transfer') {
     if (!action.location_id || action.location_id === row.location_id || !positive(action.quantity) || quantityUnits(action.quantity) > quantityUnits(row.remaining_quantity)) {
       error.value = '请选择不同的目标库位，移库数量必须大于零且不能超过原库位库存'; return
@@ -105,14 +105,14 @@ async function submitAction() {
     path = '/material-transfers'
     payload = { source_batch_id: row.id, target_location_id: action.location_id,
       quantity: action.quantity, notes: action.notes || null }
-    confirmation = `确认将 ${row.material_name} / ${row.batch_no} 从 ${row.location_name} 移出 ${action.quantity} ${row.unit}？`
+    confirmation = `确认将 ${row.material_name} / ${row.batch_no} 从 ${row.location_name} 移出 ${formatQuantity(action.quantity)} ${row.unit}？`
   } else if (actionType.value === 'count') {
     if (!nonnegative(action.actual_quantity)) { error.value = '实际盘点数量必须为非负数，最多六位小数'; return }
     path = '/material-counts'
     payload = { batch_id: row.id, book_quantity: row.remaining_quantity,
       actual_quantity: action.actual_quantity, reason: action.reason || null }
     const difference = quantityText(quantityUnits(action.actual_quantity) - quantityUnits(row.remaining_quantity))
-    confirmation = `确认 ${row.location_name} / ${row.material_name} / ${row.batch_no} 实盘 ${action.actual_quantity} ${row.unit}，差异 ${difference} ${row.unit}？`
+    confirmation = `确认 ${row.location_name} / ${row.material_name} / ${row.batch_no} 实盘 ${formatQuantity(action.actual_quantity)} ${row.unit}，差异 ${difference} ${row.unit}？`
   } else {
     let change
     try { change = quantityUnits(action.change_quantity) } catch { error.value = '调整变化量必须是最多六位小数的十进制数'; return }
@@ -122,7 +122,7 @@ async function submitAction() {
     path = '/material-adjustments'
     payload = { batch_id: row.id, book_quantity: row.remaining_quantity,
       change_quantity: action.change_quantity, reason: action.reason.trim() }
-    confirmation = `确认调整 ${row.location_name} / ${row.material_name} / ${row.batch_no} ${action.change_quantity} ${row.unit}？`
+    confirmation = `确认调整 ${row.location_name} / ${row.material_name} / ${row.batch_no} ${formatQuantity(action.change_quantity)} ${row.unit}？`
   }
   try { await ElMessageBox.confirm(confirmation, '确认库存操作', { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' }) }
   catch { return }
@@ -173,7 +173,7 @@ watch(mode, async () => {
     <FilterBar v-if="mode === 'material-location-stock'"><el-form inline @submit.prevent="search"><el-form-item label="库位"><el-select v-model="filters.location_id" clearable filterable placeholder="全部库位" @change="search"><el-option v-for="item in locations" :key="item.id" :value="item.id" :label="item.name" /></el-select></el-form-item><el-form-item label="原材料"><el-select v-model="filters.material_id" clearable filterable placeholder="全部原材料" @change="search"><el-option v-for="item in materials" :key="item.id" :value="item.id" :label="item.name" /></el-select></el-form-item><el-form-item label="批号"><el-input v-model="filters.batch_no" clearable placeholder="输入批号" @clear="search" /></el-form-item><el-form-item><el-button type="primary" :icon="Search" native-type="submit">查询</el-button></el-form-item></el-form></FilterBar>
     <TableSkeleton v-if="loading && !rows.length" />
     <el-table v-else-if="mode === 'material-putaways' && !historyMode" :data="rows" v-loading="loading" stripe row-key="id">
-      <el-table-column prop="document_no" label="入库单" min-width="190" /><el-table-column prop="material_name" label="原材料" min-width="145" /><el-table-column prop="batch_no" label="批号" min-width="130" /><el-table-column prop="supplier_name" label="供应商" min-width="130" /><el-table-column label="入库 / 已上架 / 待上架" min-width="220"><template #default="{row}">{{ row.received_quantity }} / {{ row.shelved_quantity }} / <strong>{{ row.pending_quantity }} {{ row.unit }}</strong></template></el-table-column><el-table-column label="状态" width="110"><template #default="{row}"><StatusBadge :tone="row.status === 'partial' ? 'warning' : 'info'" :label="statusText(row.status)" /></template></el-table-column><el-table-column label="操作" width="150"><template #default="{row}"><el-button link type="primary" @click="showDocument(row.id)">详情</el-button><el-button v-if="canWrite" link type="primary" @click="openAction('putaway',row)">上架</el-button></template></el-table-column>
+      <el-table-column prop="document_no" label="入库单" min-width="190" /><el-table-column prop="material_name" label="原材料" min-width="145" /><el-table-column prop="batch_no" label="批号" min-width="130" /><el-table-column prop="supplier_name" label="供应商" min-width="130" /><el-table-column label="入库 / 已上架 / 待上架" min-width="220"><template #default="{row}">{{ formatQuantity(row.received_quantity) }} / {{ formatQuantity(row.shelved_quantity) }} / <strong>{{ formatQuantity(row.pending_quantity) }} {{ row.unit }}</strong></template></el-table-column><el-table-column label="状态" width="110"><template #default="{row}"><StatusBadge :tone="row.status === 'partial' ? 'warning' : 'info'" :label="statusText(row.status)" /></template></el-table-column><el-table-column label="操作" width="150"><template #default="{row}"><el-button link type="primary" @click="showDocument(row.id)">详情</el-button><el-button v-if="canWrite" link type="primary" @click="openAction('putaway',row)">上架</el-button></template></el-table-column>
       <template #empty><EmptyState title="暂无待上架入库单" description="原材料入库后会在这里显示待上架数量。" /></template>
     </el-table>
     <el-table v-else-if="mode === 'material-location-stock'" :data="rows" v-loading="loading" stripe row-key="id">
@@ -182,9 +182,9 @@ watch(mode, async () => {
     </el-table>
     <el-table v-else-if="mode === 'material-transfers' || mode === 'material-putaways' && historyMode" :data="rows" v-loading="loading" stripe row-key="id"><el-table-column label="时间" min-width="175"><template #default="{row}">{{ dateTime(row.created_at) }}</template></el-table-column><el-table-column prop="document_no" :label="mode === 'material-putaways' ? '上架单' : '移库单'" min-width="185" /><el-table-column prop="material_name" label="原材料" min-width="140" /><el-table-column prop="batch_no" label="批号" min-width="130" /><el-table-column prop="source_location_name" label="原库位" min-width="130" /><el-table-column prop="target_location_name" label="目标库位" min-width="130" /><el-table-column label="数量" min-width="120"><template #default="{row}">{{ formatted(row.quantity,row.unit) }}</template></el-table-column><el-table-column prop="operator_name" label="操作人" min-width="110" /><el-table-column label="单据状态" width="100"><template #default="{row}">{{ row.reversed_by_document_id ? '已冲销' : '正常' }}</template></el-table-column><el-table-column label="详情" width="90"><template #default="{row}"><el-button link type="primary" @click="showDocument(row.document_id)">查看</el-button></template></el-table-column><template #empty><EmptyState title="暂无记录" /></template></el-table>
     <el-table v-else-if="mode === 'material-counts' && historyMode" :data="rows" v-loading="loading" stripe row-key="id">
-      <el-table-column prop="document_no" label="调整单号" min-width="190" /><el-table-column prop="material_name" label="原材料" min-width="130" /><el-table-column prop="batch_no" label="批号" min-width="110" /><el-table-column prop="before_quantity" label="调整前" /><el-table-column prop="change_quantity" label="变化量" /><el-table-column prop="after_quantity" label="调整后" /><el-table-column prop="unit" label="单位" width="70" /><el-table-column prop="notes" label="原调整原因" min-width="140" show-overflow-tooltip /><el-table-column label="状态"><template #default="{row}">{{ row.reversed_by_document_id ? '已冲销' : '正常' }}</template></el-table-column><el-table-column label="详情" width="90"><template #default="{row}"><el-button link type="primary" @click="showDocument(row.document_id)">查看</el-button></template></el-table-column>
+      <el-table-column prop="document_no" label="调整单号" min-width="190" /><el-table-column prop="material_name" label="原材料" min-width="130" /><el-table-column prop="batch_no" label="批号" min-width="110" /><el-table-column prop="before_quantity" :formatter="quantityColumn" label="调整前" /><el-table-column prop="change_quantity" :formatter="quantityColumn" label="变化量" /><el-table-column prop="after_quantity" :formatter="quantityColumn" label="调整后" /><el-table-column prop="unit" label="单位" width="70" /><el-table-column prop="notes" label="原调整原因" min-width="140" show-overflow-tooltip /><el-table-column label="状态"><template #default="{row}">{{ row.reversed_by_document_id ? '已冲销' : '正常' }}</template></el-table-column><el-table-column label="详情" width="90"><template #default="{row}"><el-button link type="primary" @click="showDocument(row.document_id)">查看</el-button></template></el-table-column>
     </el-table>
-    <el-table v-else :data="rows" v-loading="loading" stripe row-key="id"><el-table-column label="盘点时间" min-width="175"><template #default="{row}">{{ dateTime(row.counted_at) }}</template></el-table-column><el-table-column prop="counted_by_name" label="盘点人" min-width="100" /><el-table-column prop="location_name" label="库位" min-width="130" /><el-table-column prop="material_name" label="原材料" min-width="135" /><el-table-column prop="batch_no" label="批号" min-width="120" /><el-table-column label="账面 / 实盘 / 差异" min-width="230"><template #default="{row}">{{ row.book_quantity }} / {{ row.actual_quantity }} / <strong>{{ row.difference }} {{ row.unit }}</strong></template></el-table-column><el-table-column prop="reason" label="原因 / 备注" min-width="170" show-overflow-tooltip /><template #empty><EmptyState title="暂无盘点记录" /></template></el-table>
+    <el-table v-else :data="rows" v-loading="loading" stripe row-key="id"><el-table-column label="盘点时间" min-width="175"><template #default="{row}">{{ dateTime(row.counted_at) }}</template></el-table-column><el-table-column prop="counted_by_name" label="盘点人" min-width="100" /><el-table-column prop="location_name" label="库位" min-width="130" /><el-table-column prop="material_name" label="原材料" min-width="135" /><el-table-column prop="batch_no" label="批号" min-width="120" /><el-table-column label="账面 / 实盘 / 差异" min-width="230"><template #default="{row}">{{ formatQuantity(row.book_quantity) }} / {{ formatQuantity(row.actual_quantity) }} / <strong>{{ formatQuantity(row.difference) }} {{ row.unit }}</strong></template></el-table-column><el-table-column prop="reason" label="原因 / 备注" min-width="170" show-overflow-tooltip /><template #empty><EmptyState title="暂无盘点记录" /></template></el-table>
     <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[10,20,50,100]" layout="total, sizes, prev, pager, next" class="pagination" @current-change="load" @size-change="search" />
   </DataPanel>
 
@@ -192,7 +192,7 @@ watch(mode, async () => {
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="location-feedback" />
     <el-descriptions v-if="selectedStock()" :column="2" border class="action-summary"><el-descriptions-item label="原材料">{{ selectedStock().material_name }}</el-descriptions-item><el-descriptions-item label="批号">{{ selectedStock().batch_no }}</el-descriptions-item><el-descriptions-item :label="actionType === 'putaway' ? '待上架' : '账面库存'">{{ formatted(actionType === 'putaway' ? selectedStock().pending_quantity : selectedStock().remaining_quantity, selectedStock().unit) }}</el-descriptions-item><el-descriptions-item v-if="actionType !== 'putaway'" label="原库位">{{ selectedStock().location_name }}</el-descriptions-item><el-descriptions-item v-if="actionType === 'putaway'" label="供应商">{{ selectedStock().supplier_name }}</el-descriptions-item><el-descriptions-item v-if="actionType === 'putaway'" label="生产日期">{{ selectedStock().production_date }}</el-descriptions-item><el-descriptions-item v-if="actionType === 'putaway'" label="有效期">{{ selectedStock().expiry_date }}</el-descriptions-item></el-descriptions>
     <el-form label-width="105px" :disabled="saving" @submit.prevent="submitAction">
-      <el-form-item v-if="actionType !== 'putaway' && !selected" label="库位批次" required><el-select v-model="action.source_batch_id" filterable placeholder="选择库位、原材料和批号"><el-option v-for="item in stockOptions" :key="item.id" :value="item.id" :label="`${item.location_name} · ${item.material_name} · ${item.batch_no} · ${item.remaining_quantity} ${item.unit}`" /></el-select></el-form-item>
+      <el-form-item v-if="actionType !== 'putaway' && !selected" label="库位批次" required><el-select v-model="action.source_batch_id" filterable placeholder="选择库位、原材料和批号"><el-option v-for="item in stockOptions" :key="item.id" :value="item.id" :label="`${item.location_name} · ${item.material_name} · ${item.batch_no} · ${formatQuantity(item.remaining_quantity)} ${item.unit}`" /></el-select></el-form-item>
       <el-form-item v-if="['putaway','transfer'].includes(actionType)" label="目标库位" required><el-select v-model="action.location_id" filterable placeholder="选择目标库位"><el-option v-for="item in locations.filter(loc => loc.id !== selectedStock()?.location_id)" :key="item.id" :value="item.id" :label="item.name" /></el-select></el-form-item>
       <el-form-item v-if="['putaway','transfer'].includes(actionType)" label="本次数量" required><el-input v-model="action.quantity" inputmode="decimal" maxlength="21"><template #append>{{ selectedStock()?.unit }}</template></el-input></el-form-item>
       <el-form-item v-if="actionType === 'count'" label="实际数量" required><el-input v-model="action.actual_quantity" inputmode="decimal" maxlength="21"><template #append>{{ selectedStock()?.unit }}</template></el-input></el-form-item>

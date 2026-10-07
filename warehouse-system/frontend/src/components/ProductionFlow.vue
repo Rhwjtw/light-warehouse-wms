@@ -1,4 +1,5 @@
 <script setup>
+import { formatQuantity } from '../quantity'
 import { computed } from 'vue'
 import StatusBadge from './ui/StatusBadge.vue'
 
@@ -7,11 +8,11 @@ const records = computed(() => props.order.material_records || [])
 const count = kind => records.value.filter(row => row.kind === kind).length
 // 流程卡只解释已保存的事实；补料和退料是可选业务，不把“未发生”误写为待完成。
 const steps = computed(() => [
-  { label: '生产单', value: `${props.order.planned_quantity} ${props.order.finished_product_unit}`, hint: '计划生产', tone: 'success' },
+  { label: '生产单', value: `${formatQuantity(props.order.planned_quantity)} ${props.order.finished_product_unit}`, hint: '计划生产', tone: 'success' },
   { label: '领料', value: `${count('issue')} 笔记录`, hint: count('issue') ? '已登记' : '未发生', tone: count('issue') ? 'success' : 'info' },
   { label: '补料', value: `${count('supplement')} 笔记录`, hint: count('supplement') ? '已登记' : '未发生', tone: count('supplement') ? 'warning' : 'info' },
   { label: '退料', value: `${count('return')} 笔记录`, hint: count('return') ? '已登记' : '未发生', tone: count('return') ? 'primary' : 'info' },
-  { label: '实际产量', value: props.order.actual_quantity == null ? '未登记' : `${props.order.actual_quantity} ${props.order.finished_product_unit}`, hint: props.order.actual_quantity == null ? '等待登记' : '已登记', tone: props.order.actual_quantity == null ? 'info' : 'success' },
+  { label: '实际产量', value: props.order.actual_quantity == null ? '未登记' : `${formatQuantity(props.order.actual_quantity)} ${props.order.finished_product_unit}`, hint: props.order.actual_quantity == null ? '等待登记' : '已登记', tone: props.order.actual_quantity == null ? 'info' : 'success' },
   { label: '完工结算', value: ['completed', 'received'].includes(props.order.status) ? '已完成' : props.order.status === 'cancelled' ? '已取消' : '未完成', hint: ['completed', 'received'].includes(props.order.status) ? '成品已入库' : props.order.status === 'cancelled' ? '已取消' : '完成时重新核算', tone: ['completed', 'received'].includes(props.order.status) ? 'success' : 'info' },
 ])
 </script>

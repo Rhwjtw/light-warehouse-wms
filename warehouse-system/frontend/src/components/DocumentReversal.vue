@@ -1,4 +1,5 @@
 <script setup>
+import { formatQuantity, quantityColumn } from '../quantity'
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
@@ -84,15 +85,15 @@ async function execute() {
           <el-table-column label="库存归属" min-width="150"><template #default="{row}">{{ row.stock_scope === 'aggregate' ? '历史无批次归属库存' : row.stock_scope === 'batch' ? '真实成品批次' : '原料批次' }}</template></el-table-column>
           <el-table-column prop="source_location_name" label="原库位" min-width="100" />
           <el-table-column prop="target_location_name" label="目标库位" min-width="100" />
-          <el-table-column prop="before_quantity" label="变动前" min-width="95" />
-          <el-table-column prop="change_quantity" label="变动量" min-width="95" />
-          <el-table-column prop="after_quantity" label="变动后" min-width="95" />
+          <el-table-column prop="before_quantity" :formatter="quantityColumn" label="变动前" min-width="95" />
+          <el-table-column prop="change_quantity" :formatter="quantityColumn" label="变动量" min-width="95" />
+          <el-table-column prop="after_quantity" :formatter="quantityColumn" label="变动后" min-width="95" />
         </el-table>
         <template v-if="preview">
           <h4>冲销预览</h4>
           <el-alert :title="preview.message" :type="preview.eligible ? 'info' : 'warning'" :closable="false" show-icon />
-          <p v-for="row in preview.changes" :key="row.batch_id">{{ row.item_name }} {{ row.batch_no || '' }} {{ row.location_name || '' }}：{{ row.before_quantity }} + {{ row.change_quantity }} = {{ row.after_quantity }} {{ row.unit }}</p>
-          <p v-if="preview.shelved_quantity_after != null">冲销后有效已上架数量：{{ preview.shelved_quantity_after }}</p>
+          <p v-for="row in preview.changes" :key="row.batch_id">{{ row.item_name }} {{ row.batch_no || '' }} {{ row.location_name || '' }}：{{ formatQuantity(row.before_quantity) }} + {{ formatQuantity(row.change_quantity) }} = {{ formatQuantity(row.after_quantity) }} {{ row.unit }}</p>
+          <p v-if="preview.shelved_quantity_after != null">冲销后有效已上架数量：{{ formatQuantity(preview.shelved_quantity_after) }}</p>
           <el-form v-if="preview.eligible && canReverse" label-position="top" @submit.prevent="execute">
             <el-form-item label="冲销原因（必填）" required><el-input v-model="reason" type="textarea" :rows="2" maxlength="2000" show-word-limit placeholder="说明原单错误及修正依据" /></el-form-item>
             <el-button type="danger" :loading="saving" native-type="submit">作废 / 冲销</el-button>

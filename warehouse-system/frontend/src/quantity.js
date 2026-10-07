@@ -1,4 +1,15 @@
 // Six decimal places, matching SQL DECIMAL(20,6), without binary floating point.
+// Display only: trim decimal padding without rounding or converting to Number.
+export function formatQuantity(value) {
+  if (value == null) return '—'
+  const text = String(value)
+  if (!/^-?\d+(?:\.\d+)?$/.test(text) || !text.includes('.')) return text
+  return text.replace(/0+$/, '').replace(/\.$/, '')
+}
+export function quantityColumn(_row, _column, value) {
+  return formatQuantity(value)
+}
+
 export function quantityUnits(value) {
   const match = /^(-?)(\d+)(?:\.(\d{1,6}))?$/.exec(String(value))
   if (!match) throw new Error('数量必须是最多六位小数的十进制数')

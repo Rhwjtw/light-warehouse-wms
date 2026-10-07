@@ -1,4 +1,5 @@
 <script setup>
+import { formatQuantity } from '../quantity'
 import { onMounted, reactive, ref } from 'vue'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import { api } from '../api'
@@ -38,11 +39,11 @@ onMounted(load)
     <el-table v-else :data="rows" v-loading="loading" stripe>
       <el-table-column prop="order_no" label="生产单号" min-width="155" />
       <el-table-column prop="product_name" label="成品" min-width="110" show-overflow-tooltip />
-      <el-table-column label="实际产量" min-width="130"><template #default="{row}"><span class="data-value">{{ row.actual_quantity }} {{ row.product_unit }}</span></template></el-table-column>
+      <el-table-column label="实际产量" min-width="130"><template #default="{row}"><span class="data-value">{{ formatQuantity(row.actual_quantity) }} {{ row.product_unit }}</span></template></el-table-column>
       <el-table-column prop="material_name" label="原材料" min-width="105" show-overflow-tooltip />
-      <el-table-column label="最终理论用量" min-width="135"><template #default="{row}"><span class="data-value">{{ row.final_theoretical_quantity }} {{ row.base_unit }}</span></template></el-table-column>
-      <el-table-column label="实际用量" min-width="135"><template #default="{row}"><span class="data-value">{{ row.actual_used_quantity }} {{ row.base_unit }}</span></template></el-table-column>
-      <el-table-column label="差异 / 损耗数量" min-width="160"><template #default="{row}"><div class="loss-value"><span class="data-value">{{ row.loss_quantity }} {{ row.base_unit }}</span><StatusBadge v-if="Number(row.loss_quantity) < 0" tone="warning" label="节余 / 负损耗" /></div></template></el-table-column>
+      <el-table-column label="最终理论用量" min-width="135"><template #default="{row}"><span class="data-value">{{ formatQuantity(row.final_theoretical_quantity) }} {{ row.base_unit }}</span></template></el-table-column>
+      <el-table-column label="实际用量" min-width="135"><template #default="{row}"><span class="data-value">{{ formatQuantity(row.actual_used_quantity) }} {{ row.base_unit }}</span></template></el-table-column>
+      <el-table-column label="差异 / 损耗数量" min-width="160"><template #default="{row}"><div class="loss-value"><span class="data-value">{{ formatQuantity(row.loss_quantity) }} {{ row.base_unit }}</span><StatusBadge v-if="Number(row.loss_quantity) < 0" tone="warning" label="节余 / 负损耗" /></div></template></el-table-column>
       <el-table-column label="损耗率" width="85"><template #default="{row}"><span class="data-value">{{ row.loss_rate == null ? '—' : `${Number(row.loss_rate).toFixed(2)}%` }}</span></template></el-table-column>
       <el-table-column label="完成时间" min-width="185"><template #default="{row}">{{ new Date(row.completed_at).toLocaleString('zh-CN', { timeZone:auth.user?.business_timezone || 'Asia/Shanghai', hour12:false }) }}</template></el-table-column>
       <template #empty><EmptyState title="暂无结算记录" description="完成生产后可按生产单、成品或原材料筛选结果。" /></template>
