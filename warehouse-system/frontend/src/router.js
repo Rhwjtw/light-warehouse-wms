@@ -37,7 +37,7 @@ const router = createRouter({
   async scrollBehavior(to, from, saved) {
     if (!to.meta.mobile) return saved || false
     // S3远程数据由列表组件在渲染完成后恢复；此处不能对空DOM提前滚动。
-    if (to.meta.mobileAsyncList) return false
+    if (to.meta.mobileAsyncList || (to.meta.mobileReceiptTask && to.params.step === 'choose')) return false
     await nextTick()
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     if (to.meta.mobileList) {
@@ -61,17 +61,17 @@ const router = createRouter({
 })
 router.beforeEach(async (to, from) => {
   if (from.meta.mobile && from.fullPath !== to.fullPath) window.dispatchEvent(new Event('wms-mobile-stop-resources'))
-  if (from.meta.mobileList && (!from.meta.mobileAsyncList || document.querySelector('[data-mobile-list-ready]'))) {
+  if ((from.meta.mobileList || (from.meta.mobileReceiptTask && from.params.step === 'choose')) && (!from.meta.mobileAsyncList && !from.meta.mobileReceiptTask || document.querySelector('[data-mobile-list-ready]'))) {
     const anchor = [...document.querySelectorAll('[data-mobile-anchor]')].find(element => element.getBoundingClientRect().bottom > 80)
     mobileStore()?.saveList(from.fullPath, { top: window.scrollY, anchor: anchor?.id })
   }
-  if (from.fullPath !== to.fullPath && from.meta.mobileLabTask) { mobileStore()?.suspend(); touchMobile() }
+  if (from.fullPath !== to.fullPath && (from.meta.mobileLabTask || from.meta.mobileReceiptTask)) { mobileStore()?.suspend(); touchMobile() }
   // 页面守卫确认登录态；写入权限由页面按钮和服务端接口分别检查。
   if (to.meta.public) return true
   try {
     if (!await restoreAuth()) return loginLocation(to)
     if (!canAccess(auth.user.role, to.meta.resource)) return '/'
-    if (to.meta.mobileLabTask) {
+    if (to.meta.mobileLabTask || to.meta.mobileReceiptTask) {
       const task = mobileStore()?.get(to.params.jobId)
       const completed = completedTaskLocation(to, task)
       if (completed) return completed

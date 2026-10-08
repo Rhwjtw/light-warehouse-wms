@@ -1,4 +1,5 @@
 import { safeReadOrigin } from './readQueries.js'
+import { receiptOrigin, receiptTaskPath } from './receipt.js'
 
 export function prototypeListLocation(value) {
   if (typeof value !== 'string' || value.includes('\\')) return '/m/state-lab'
@@ -10,6 +11,10 @@ export function prototypeListLocation(value) {
 }
 
 export function mobileParentLocation(route, task) {
+  if (route.meta.mobileReceiptTask) {
+    if (['confirm', 'choose'].includes(route.params.step) && task && ['draft', 'rejected'].includes(task.status)) return receiptTaskPath(task)
+    return receiptOrigin(task?.origin || route.query.from)
+  }
   if (route.meta.mobileAsyncList && route.query.from && route.path !== '/m/locations') return safeReadOrigin(route.query.from)
   if (route.meta.mobileReadDetail) return safeReadOrigin(route.query.from, '/m/records')
   if (route.path === '/m/locations') return safeReadOrigin(route.query.from)
@@ -29,7 +34,7 @@ export function returnToParent(router, target) {
 export function completedTaskLocation(route, task) {
   // 将过时历史条目替换为结果；不新增历史条目，连续后退最终仍可离开任务。
   return task?.status === 'succeeded' && route.params.step !== 'result'
-    ? { path: `/m/state-lab/${task.id}/result`, replace: true }
+    ? { path: task.kind === 'material-receipt' ? receiptTaskPath(task, 'result') : `/m/state-lab/${task.id}/result`, replace: true }
     : null
 }
 

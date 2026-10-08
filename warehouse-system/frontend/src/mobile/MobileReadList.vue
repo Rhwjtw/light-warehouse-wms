@@ -71,6 +71,7 @@ onBeforeUnmount(() => { gate.cancel(); window.removeEventListener('wms-mobile-re
 <template>
   <section class="mobile-card">
     <span class="mobile-pill">只读查询</span><h2>{{ route.path === '/m/pending' ? '具体入库记录' : config.label }}</h2>
+    <router-link v-if="route.path === '/m/pending' || (route.path === '/m/records' && criteria.view === 'receipts')" :to="{ path: '/m/jobs/receipt', query: { from: route.fullPath } }" class="mobile-button">办理原料入库</router-link>
     <p class="mobile-muted mobile-small">数量来自当前查询，单位分别显示。记录只能辅助人工核对，空列表或相似记录不能确定某次请求是否记账。</p>
     <label v-if="Object.keys(views).length > 1" class="mobile-select-label">查询范围<select :value="criteria.view" aria-label="查询范围" @change="switchView($event.target.value)"><option v-for="(view, key) in views" :key="key" :value="key">{{ view.label }}</option></select></label>
     <form v-if="config.search" class="mobile-form" @submit.prevent="apply"><label>{{ config.search }}<input v-model="search" type="search" :maxlength="criteria.view === 'locations' ? 80 : 120" /></label><button class="mobile-button primary" :disabled="loading">搜索</button></form>
