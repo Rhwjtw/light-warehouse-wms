@@ -3,7 +3,9 @@
 param(
     [string]$SourceRoot = 'D:\LightWarehouseWMS',
     [string]$RecoveryRoot = 'D:\LightWarehouseWMS-Recovery',
-    [ValidateRange(1024,65535)][int]$TestPort = 33680
+    [ValidateRange(1024,65535)][int]$TestPort = 33680,
+    [switch]$VerifyBackup,
+    [ValidateRange(1024,65535)][int]$RestorePort = 33682
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -32,6 +34,7 @@ foreach ($taskRequired in @('data\config.json','data\mysql\auto.cnf','python\pyt
 $taskConfig = Get-Content -LiteralPath (Join-Path $taskSource 'data\config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($taskConfig.format -ne 1 -or $taskConfig.ready -ne $true -or -not $taskConfig.server_uuid) { throw '原配置状态不符合已初始化实例，停止。' }
 if ($TestPort -in @(80,3306,[int]$taskConfig.mysql_port,[int]$taskConfig.web_port)) { throw '测试端口必须与原实例端口不同。' }
+if ($VerifyBackup -and $RestorePort -in @(80,3306,$TestPort,[int]$taskConfig.mysql_port,[int]$taskConfig.web_port)) { throw 'SQL验证端口必须与原实例及冷副本端口不同。' }
 function Assert-SourceStopped {
     $taskManagedNames = @('mysqld.exe','python.exe','pythonw.exe','轻仓WMS.exe')
     $taskProcesses = @(Get-CimInstance Win32_Process | Where-Object {
@@ -39,7 +42,9 @@ function Assert-SourceStopped {
         ($_.Name -in $taskManagedNames -and $_.CommandLine -and $_.CommandLine.IndexOf($taskSource,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.ProcessId -ne $PID)
     })
     if ($taskProcesses.Count -gt 0) { throw '发现使用原安装目录的进程，停止；本脚本不会强停进程。' }
-    foreach ($taskPort in @([int]$taskConfig.mysql_port,[int]$taskConfig.web_port,$TestPort)) {
+    $taskPorts = @([int]$taskConfig.mysql_port,[int]$taskConfig.web_port,$TestPort)
+    if ($VerifyBackup) { $taskPorts += $RestorePort }
+    foreach ($taskPort in $taskPorts) {
         if (@(Get-NetTCPConnection -State Listen -LocalPort $taskPort -ErrorAction SilentlyContinue).Count -gt 0) { throw '原实例或测试端口存在监听，停止。' }
     }
 }
@@ -76,12 +81,23 @@ foreach ($taskName in $taskBefore.Keys) {
 $taskProbe = Join-Path $PSScriptRoot 'Inspect-WmsUpgradeCopy.py'
 if (-not (Test-Path -LiteralPath $taskProbe -PathType Leaf)) { throw '缺少配套副本诊断脚本，停止。' }
 & (Join-Path $taskWorking 'python\python.exe') -I $taskProbe --copy $taskWorking --source $taskSource --port $TestPort
-if ($LASTEXITCODE -ne 0) { throw ('副本检查未通过，停止；保留本次目录：'+$taskRun) }
+$taskInspectStatus = $LASTEXITCODE
+$taskBackupStatus = 0
+if ($taskInspectStatus -eq 0 -and $VerifyBackup) {
+    $taskBackupProbe = Join-Path $PSScriptRoot 'Verify-WmsBackupInCopy.py'
+    if (-not (Test-Path -LiteralPath $taskBackupProbe -PathType Leaf)) { throw '缺少SQL另库验证脚本，停止。' }
+    & (Join-Path $taskWorking 'python\python.exe') -I $taskBackupProbe --copy $taskWorking --port $TestPort --restore-port $RestorePort
+    $taskBackupStatus = $LASTEXITCODE
+}
 Assert-SourceStopped
 $taskFinal = Get-TreeHashes $taskSource
 if ($taskFinal.Count -ne $taskBefore.Count) { throw '原目录文件集合变化，停止。' }
 foreach ($taskName in $taskBefore.Keys) {
     if ($taskBefore[$taskName] -ne $taskFinal[$taskName]) { throw '原目录哈希变化，停止。' }
 }
+@{original_files=$taskBefore.Count;sha256_all_unchanged=$true;inspection_exit=$taskInspectStatus;backup_validation_exit=$taskBackupStatus;backup_validation_requested=[bool]$VerifyBackup} |
+    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRun 'original-preservation.json') -Encoding UTF8
+if ($taskInspectStatus -ne 0 -or $taskBackupStatus -ne 0) { throw ('副本检查或SQL另库验证未通过，停止；原目录SHA未变，本次目录：'+$taskRun) }
 Write-Output ('副本诊断完成。原目录逐文件SHA未变；结果：'+(Join-Path $taskRun 'inspection.json'))
+if ($VerifyBackup) { Write-Output ('SQL另库验证结果：'+(Join-Path $taskRun 'backup-validation.json')) }
 Write-Output '本脚本没有恢复正式系统。请先审阅结果，再选择经验证的恢复分支。'
