@@ -24,7 +24,7 @@ export function mobileLoginTarget(value) {
   if (typeof value !== 'string' || value.includes('\\') || /[\u0000-\u001f]/.test(value)) return '/m'
   const path = value.split(/[?#]/)[0]
   const paths = [...mobileNavigation.map(item => item.path), '/m/account/password', ...mobileActions.map(item => item.path)]
-  return paths.includes(path) || path === '/m/state-lab' || /^\/m\/state-lab\/[\w-]{1,80}\/(form|confirm|result|context)$/.test(path) ? value : '/m'
+  return paths.includes(path) || ['/m/pending', '/m/locations', '/m/state-lab'].includes(path) || /^\/m\/read\/(batch|finished|receipt|document|count)\/[1-9]\d{0,9}$/.test(path) || /^\/m\/state-lab\/[\w-]{1,80}\/(form|confirm|result|context)$/.test(path) ? value : '/m'
 }
 
 export function loginLocation(route) {
@@ -38,9 +38,12 @@ export const mobileRoutes = [
     path: '/m', component: () => import('./MobileLayout.vue'), meta: { mobile: true },
     children: [
       { path: '', component: () => import('./MobileHome.vue'), meta: { title: '工作台', mobileTab: '/m' } },
-      { path: 'inventory', component: pending, meta: { title: '库存', mobileTab: '/m/inventory', mobileParent: '/m', stage: 'S3' } },
+      { path: 'inventory', component: () => import('./MobileReadList.vue'), meta: { title: '库存', mobileTab: '/m/inventory', mobileParent: '/m', stage: 'S3', mobileList: true, mobileAsyncList: true } },
       { path: 'jobs', component: pending, meta: { title: '作业', mobileTab: '/m/jobs', mobileParent: '/m', stage: 'S4～S6' } },
-      { path: 'records', component: pending, meta: { title: '记录', mobileTab: '/m/records', mobileParent: '/m', stage: 'S3', pendingLabel: '单据与流水查询' } },
+      { path: 'records', component: () => import('./MobileReadList.vue'), meta: { title: '记录', mobileTab: '/m/records', mobileParent: '/m', stage: 'S3', mobileList: true, mobileAsyncList: true } },
+      { path: 'pending', component: () => import('./MobileReadList.vue'), meta: { title: '待上架记录', mobileTab: '/m/jobs', mobileParent: '/m/jobs', mobileList: true, mobileAsyncList: true } },
+      { path: 'locations', component: () => import('./MobileReadList.vue'), meta: { title: '查找库位', mobileParent: '/m/inventory', mobileList: true, mobileAsyncList: true } },
+      { path: 'read/:kind(batch|finished|receipt|document|count)/:id([1-9]\\d{0,9})', component: () => import('./MobileReadDetail.vue'), meta: { title: '查询详情', mobileParent: '/m/inventory', mobileReadDetail: true } },
       { path: 'account', component: () => import('./MobileAccount.vue'), meta: { title: '我的', mobileTab: '/m/account', mobileParent: '/m' } },
       { path: 'account/password', component: () => import('./MobilePassword.vue'), meta: { title: '修改密码', mobileParent: '/m/account', mobileTask: true } },
       { path: 'state-lab', component: () => import('./MobileStateLab.vue'), meta: { title: 'S2 状态演练', mobileParent: '/m/jobs', mobileList: true, mobileTask: true } },

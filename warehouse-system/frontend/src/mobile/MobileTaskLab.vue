@@ -80,7 +80,7 @@ onBeforeUnmount(() => { if (timer.value) clearTimeout(timer.value); window.remov
     <h2>{{ taskLabels[task.status] }}</h2><p>{{ task.reason || task.result?.label || '正在等待演练响应，请勿重复提交。' }}</p>
     <dl class="mobile-details"><div><dt>本次数量</dt><dd>{{ formatQuantity(task.snapshot?.quantity) }} kg</dd></div><div><dt>库位</dt><dd>{{ task.snapshot?.location }}</dd></div><div><dt>请求时间</dt><dd>{{ task.submittedAt }}</dd></div><div><dt>备注</dt><dd>{{ task.snapshot?.notes || '—' }}</dd></div></dl>
     <p v-if="task.status === 'succeeded'" class="mobile-success">演练成功，旧表单已失效。实际业务没有记账，未查询任何余额。</p>
-    <template v-if="task.status === 'uncertain'"><p class="mobile-warning">必须先核对相关单据/流水。空列表、相似数量/人员/时间不能唯一确定原请求。本原型没有实际业务结果。</p><router-link to="/m/records" class="mobile-button">去记录入口（S3 尚未接入）</router-link></template>
+    <template v-if="task.status === 'uncertain'"><p class="mobile-warning">必须先核对相关单据/流水。空列表、相似数量/人员/时间不能唯一确定原请求。本原型没有实际业务结果。</p><router-link to="/m/records" class="mobile-button">查看单据与流水（仅辅助核对）</router-link></template>
     <button v-if="task.status === 'submitting'" class="mobile-button" @click="resolvePending">演练响应丢失，保留待核实</button>
     <button class="mobile-button primary" @click="returnList">返回原列表</button>
   </section>

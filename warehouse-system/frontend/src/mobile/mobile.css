@@ -71,3 +71,8 @@
 .mobile-root .mobile-content { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px) + var(--mobile-keyboard-inset, 0px)); }
 .mobile-task .mobile-content { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px) + var(--mobile-keyboard-inset, 0px)); }
 .mobile-root input, .mobile-root textarea, .mobile-root select, .mobile-root [data-mobile-anchor] { scroll-margin-top: 80px; scroll-margin-bottom: 24px; }
+.mobile-quantity { font-size: 24px; font-weight: 650; margin: 10px 0 !important; }
+.mobile-read-fields dt { width: 88px; font-size: 14px; }
+.mobile-read-fields dd { flex: 1; }
+.mobile-read-fields div + div { border-top: 1px solid #f1f5f9; }
+.mobile-batch-search { display: block; width: 100%; min-width: 0; min-height: 48px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; font-size: 16px; }

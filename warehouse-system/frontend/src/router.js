@@ -36,6 +36,8 @@ const router = createRouter({
   history: createWebHistory(),
   async scrollBehavior(to, from, saved) {
     if (!to.meta.mobile) return saved || false
+    // S3远程数据由列表组件在渲染完成后恢复；此处不能对空DOM提前滚动。
+    if (to.meta.mobileAsyncList) return false
     await nextTick()
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     if (to.meta.mobileList) {
@@ -59,7 +61,7 @@ const router = createRouter({
 })
 router.beforeEach(async (to, from) => {
   if (from.meta.mobile && from.fullPath !== to.fullPath) window.dispatchEvent(new Event('wms-mobile-stop-resources'))
-  if (from.meta.mobileList) {
+  if (from.meta.mobileList && (!from.meta.mobileAsyncList || document.querySelector('[data-mobile-list-ready]'))) {
     const anchor = [...document.querySelectorAll('[data-mobile-anchor]')].find(element => element.getBoundingClientRect().bottom > 80)
     mobileStore()?.saveList(from.fullPath, { top: window.scrollY, anchor: anchor?.id })
   }

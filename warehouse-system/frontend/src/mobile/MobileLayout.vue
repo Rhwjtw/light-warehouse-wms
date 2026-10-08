@@ -28,7 +28,7 @@ async function resume() {
     const user = (await api.get('/auth/me')).data
     if (user.id !== auth.user?.id) throw new Error('账号已变化，请重新登录')
     auth.user = user; touchMobile()
-    recovery.value = '已恢复登录；演练任务保留。业务最新数据须在接入后重新读取。'
+    recovery.value = '已恢复登录；查询页面正在重新读取，演练任务保留。'
     window.dispatchEvent(new Event('wms-mobile-resume'))
   } catch (e) { recovery.value = `恢复核实失败：${e.message}。不会自动提交。` }
   finally { resuming = false }

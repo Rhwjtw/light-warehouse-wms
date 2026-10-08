@@ -1,3 +1,5 @@
+import { safeReadOrigin } from './readQueries.js'
+
 export function prototypeListLocation(value) {
   if (typeof value !== 'string' || value.includes('\\')) return '/m/state-lab'
   try {
@@ -8,6 +10,9 @@ export function prototypeListLocation(value) {
 }
 
 export function mobileParentLocation(route, task) {
+  if (route.meta.mobileAsyncList && route.query.from && route.path !== '/m/locations') return safeReadOrigin(route.query.from)
+  if (route.meta.mobileReadDetail) return safeReadOrigin(route.query.from, '/m/records')
+  if (route.path === '/m/locations') return safeReadOrigin(route.query.from)
   if (route.meta.mobileLabTask) {
     if (['confirm', 'context'].includes(route.params.step) && task && ['draft', 'rejected'].includes(task.status)) return `/m/state-lab/${task.id}/form`
     return prototypeListLocation(task?.origin)
