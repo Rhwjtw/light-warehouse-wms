@@ -1,3 +1,4 @@
+import { stockKinds, stockLabels } from './stockJobs.js'
 export const mobileNavigation = [
   { path: '/m', label: '工作台', icon: 'House' },
   { path: '/m/inventory', label: '库存', icon: 'Box' },
@@ -23,8 +24,8 @@ export function visibleMobileActions(role, canOperate) {
 export function mobileLoginTarget(value) {
   if (typeof value !== 'string' || value.includes('\\') || /[\u0000-\u001f]/.test(value)) return '/m'
   const path = value.split(/[?#]/)[0]
-  if (/^\/m\/jobs\/(receipt|putaway)\/[\w-]{1,80}\/(form|confirm|result|choose)$/.test(path)) return value
-  const paths = [...mobileNavigation.map(item => item.path), '/m/account/password', ...mobileActions.map(item => item.path)]
+  if (/^\/m\/jobs\/(receipt|putaway|material-outbound|finished-outbound|finished-receipt)\/[\w-]{1,80}\/(form|confirm|result|choose)$/.test(path)) return value
+  const paths = [...mobileNavigation.map(item => item.path), '/m/account/password', ...mobileActions.map(item => item.path), ...stockKinds.map(kind => `/m/jobs/${kind}`)]
   return paths.includes(path) || ['/m/pending', '/m/locations', '/m/state-lab'].includes(path) || /^\/m\/read\/(batch|finished|receipt|document|count)\/[1-9]\d{0,9}$/.test(path) || /^\/m\/state-lab\/[\w-]{1,80}\/(form|confirm|result|context)$/.test(path) ? value : '/m'
 }
 
@@ -53,6 +54,10 @@ export const mobileRoutes = [
       { path: 'jobs/receipt/:jobId([\\w-]{1,80})/:step(form|confirm|result|choose)', component: () => import('./MobileReceipt.vue'), meta: { title: '原料入库', mobileParent: '/m/jobs', mobileTask: true, mobileReceiptTask: true } },
       { path: 'jobs/putaway', component: () => import('./MobilePutaway.vue'), meta: { title: '原料手动上架', mobileParent: '/m/jobs', mobileTask: true, mobilePutawayTask: true } },
       { path: 'jobs/putaway/:jobId([\\w-]{1,80})/:step(form|confirm|result|choose)', component: () => import('./MobilePutaway.vue'), meta: { title: '原料手动上架', mobileParent: '/m/jobs', mobileTask: true, mobilePutawayTask: true } },
+      ...stockKinds.flatMap(kind => [
+        { path: `jobs/${kind}`, component: () => import('./MobileStockJob.vue'), meta: { title: stockLabels[kind], stockKind: kind, mobileParent: '/m/jobs', mobileTask: true, mobileStockTask: true } },
+        { path: `jobs/${kind}/:jobId([\\w-]{1,80})/:step(form|confirm|result|choose)`, component: () => import('./MobileStockJob.vue'), meta: { title: stockLabels[kind], stockKind: kind, mobileParent: '/m/jobs', mobileTask: true, mobileStockTask: true } },
+      ]),
       ...mobileActions.filter(item => !['inventory', 'receipt', 'putaway'].includes(item.key)).map(item => ({
         path: `jobs/${item.key}`, component: pending,
         meta: { title: item.label, mobileParent: '/m/jobs', mobileTask: true, stage: item.stage },
