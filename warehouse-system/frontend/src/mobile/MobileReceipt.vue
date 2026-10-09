@@ -166,7 +166,7 @@ onBeforeUnmount(() => { disposed = true; gate.cancel(); choiceGate.cancel(); win
 
 <template>
   <section class="mobile-card"><span class="mobile-pill">原料入库 · 入库后待上架</span><p v-if="task">状态：{{ taskLabels[task.status] }}</p><p v-if="!allowed" class="mobile-warning">当前角色可查询，无原料入库权限。</p><p v-if="warning" class="mobile-error" role="alert">{{ warning }}</p><p v-if="error" class="mobile-error" role="alert">{{ error }}</p><p v-if="checking" role="status">正在重新核实记录与权限…</p></section>
-  <section v-if="step === 'start'" class="mobile-card"><h2>原料入库</h2><p>填写原料、供应商、批号、日期和数量，核对后记入待上架。手动上架将在 S4-B 实现。</p><button class="mobile-button primary" :disabled="!allowed || Boolean(warning)" @click="start">开始原料入库 / 恢复草稿</button><router-link v-for="draft in drafts" :key="draft.id" :to="receiptTaskPath(draft, lockedTask(draft) ? 'result' : 'form')" class="mobile-button">恢复{{ taskLabels[draft.status] }} · {{ draft.snapshot?.batchNo || draft.fields.batchNo || '未填批号' }}</router-link></section>
+  <section v-if="step === 'start'" class="mobile-card"><h2>原料入库</h2><p>填写原料、供应商、批号、日期和数量，核对后记入待上架。</p><button class="mobile-button primary" :disabled="!allowed || Boolean(warning)" @click="start">开始原料入库 / 恢复草稿</button><router-link v-for="draft in drafts" :key="draft.id" :to="receiptTaskPath(draft, lockedTask(draft) ? 'result' : 'form')" class="mobile-button">恢复{{ taskLabels[draft.status] }} · {{ draft.snapshot?.batchNo || draft.fields.batchNo || '未填批号' }}</router-link></section>
   <section v-else-if="!task" class="mobile-card"><p>作业上下文不存在，可能已清理或属于其他账号。不能重建原请求。</p><router-link to="/m/jobs/receipt" class="mobile-button">返回原料入库入口</router-link></section>
   <section v-else-if="locked" class="mobile-card">
     <h2>{{ task.status === 'succeeded' ? '原料入库成功' : taskLabels[task.status] }}</h2><p>{{ task.reason }}</p>
@@ -178,7 +178,7 @@ onBeforeUnmount(() => { disposed = true; gate.cancel(); choiceGate.cancel(); win
       <p v-if="stock">该原料已上架库存汇总（实查）：{{ formatQuantity(stock.remaining_quantity) }} {{ stock.unit }}。本笔待上架量不计入此汇总。</p><p v-else class="mobile-warning">相关库存待刷新，不能用旧量代替。</p><p v-if="refreshed" class="mobile-muted">读取时间：{{ refreshed }}</p>
       <button class="mobile-button" :disabled="checking" @click="refreshResult">重新读取本笔记录与库存</button>
       <router-link :to="{ path: `/m/read/receipt/${task.result.id}`, query: { from: receiptOrigin(task.origin) } }" class="mobile-button">查看本笔入库详情</router-link>
-      <p class="mobile-muted">手动上架留待 S4-B；本页没有上架提交。</p>
+      <router-link v-if="allowed && detail && !['reversed', 'shelved'].includes(detail.status)" :to="{ path: '/m/jobs/putaway', query: { receipt_id: String(task.result.id), movement_id: String(task.result.movementId), from: receiptOrigin(task.origin) } }" class="mobile-button primary">去上架本次入库（具体明细）</router-link>
       <button class="mobile-button primary" :disabled="!allowed || Boolean(warning)" @click="start">继续入库（新作业）</button>
     </template>
     <template v-else><p class="mobile-warning">结果待核实。原请求内容及请求键保留；查询为空或相似记录都不能确定结果，不自动补记，也不能重新提交。</p><router-link to="/m/records?view=receipts" class="mobile-button">查询入库记录（仅辅助核对）</router-link></template>

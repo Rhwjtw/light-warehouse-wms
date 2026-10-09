@@ -94,7 +94,7 @@ onBeforeUnmount(() => { gate.cancel(); window.removeEventListener('wms-mobile-re
       <p v-if="row.production_date || row.expiry_date" class="mobile-small">生产 {{ row.production_date || '—' }} / 到期 {{ row.expiry_date || '—' }}</p>
       <p v-if="row.expired" class="mobile-warning">已过期；查询可见不代表可正常出库</p><p v-if="row.is_active === false" class="mobile-warning">档案已停用</p>
       <p v-if="row.receipt_movement_id">入库单 ID {{ row.id }} · 明细 ID {{ row.receipt_movement_id }}</p><p v-if="row.pending_quantity !== undefined">待上架 {{ quantityText(row.pending_quantity, row.unit) }} · {{ receiptStatuses[row.status] }}</p>
-      <p v-if="row.kind">{{ kindLabels[row.kind] || row.kind }} <span v-if="row.reversed_by_document_id">· 已冲销</span></p>
+      <router-link v-if="criteria.view === 'receipts' && ['pending', 'partial'].includes(row.status)" :to="{ path: '/m/jobs/putaway', query: { receipt_id: String(row.id), movement_id: String(row.receipt_movement_id), from: route.fullPath } }" class="mobile-button">手动上架此明细</router-link><p v-if="row.kind">{{ kindLabels[row.kind] || row.kind }} <span v-if="row.reversed_by_document_id">· 已冲销</span></p>
       <p v-if="row.material_outbound_purpose">用途 {{ { normal: '普通出库', supplier_return: '供应商退货', scrap: '报废' }[row.material_outbound_purpose] }}</p>
       <p v-if="row.source_location_name || row.target_location_name">{{ row.source_location_name || '无来源库位' }} → {{ row.target_location_name || '无目标库位' }}</p>
       <p v-if="row.before_quantity !== undefined" class="mobile-small">变动前 {{ quantityText(row.before_quantity, row.unit) }} → 变动后 {{ quantityText(row.after_quantity, row.unit) }}</p>

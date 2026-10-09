@@ -9,6 +9,7 @@ import { mobileParentLocation, returnToParent } from './navigation'
 import { mobileRevision, mobileStore, pendingMobileTasks, touchMobile } from './session'
 import { attachMobileLifecycle } from './lifecycle'
 import { receiptTaskPath } from './receipt'
+import { putawayTaskPath } from './putaway'
 import './mobile.css'
 const route = useRoute(), router = useRouter(), viewport = ref({ inset: 0, keyboard: false }), recovery = ref('')
 const parent = computed(() => {
@@ -48,7 +49,7 @@ onBeforeUnmount(() => cleanup?.())
       <span v-else class="mobile-brand" aria-hidden="true">仓</span>
       <h1>{{ route.meta.title }}</h1><span class="mobile-header-tag">轻仓 WMS</span>
     </header>
-    <main id="mobile-content" class="mobile-content"><p v-if="recovery" class="mobile-warning" role="status">{{ recovery }}</p><router-link v-for="item in pending" :key="item.id" :to="item.kind === 'material-receipt' ? receiptTaskPath(item, 'result') : '/m/state-lab'" class="mobile-warning mobile-text-link">{{ item.kind === 'material-receipt' ? '原料入库' : 'S2演练' }}处理中/待核实：先核对，不能重交</router-link><router-view /></main>
+    <main id="mobile-content" class="mobile-content"><p v-if="recovery" class="mobile-warning" role="status">{{ recovery }}</p><router-link v-for="item in pending" :key="item.id" :to="item.kind === 'material-receipt' ? receiptTaskPath(item, 'result') : item.kind === 'material-putaway' ? putawayTaskPath(item, 'result') : '/m/state-lab'" class="mobile-warning mobile-text-link">{{ item.kind === 'material-receipt' ? '原料入库' : item.kind === 'material-putaway' ? '原料上架' : 'S2演练' }}处理中/待核实：先核对，不能重交</router-link><router-view /></main>
     <nav v-if="!route.meta.mobileTask" class="mobile-nav" aria-label="手机主导航">
       <router-link v-for="item in mobileNavigation" :key="item.path" :to="item.path" :class="{ active: route.meta.mobileTab === item.path }" :aria-current="route.meta.mobileTab === item.path ? 'page' : undefined">
         <component :is="icons[item.icon]" /><span>{{ item.label }}</span>

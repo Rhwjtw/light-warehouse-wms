@@ -60,8 +60,8 @@ onBeforeUnmount(() => { gate.cancel(); window.removeEventListener('wms-mobile-re
       <router-link :to="{ path: '/m/records', query: { view: 'finished', product_id: String(detail.id) } }" class="mobile-button">查看本成品全部流水</router-link>
     </template>
     <template v-if="route.params.kind === 'receipt'">
-      <p class="mobile-warning">{{ detail.status === 'reversed' ? '本入库已冲销，不能继续上架。' : detail.status === 'shelved' ? '本记录已全部上架。' : '待上架量为最新查询值；本阶段仅查询，上架操作尚未接入。' }}</p>
-      <section v-for="allocation in detail.allocations" :key="allocation.id" class="mobile-card"><h2>上架分配 {{ allocation.id }} {{ allocation.reversed_by_document_id ? '（已冲销）' : '' }}</h2><MobileReadFields :record="{ ...allocation, unit: detail.unit }" /><router-link :to="{ path: '/m/read/document/' + allocation.document_id, query: { from: origin } }" class="mobile-button">查看上架单据</router-link></section>
+      <p class="mobile-warning">{{ detail.status === 'reversed' ? '本入库已冲销，不能继续上架。' : detail.status === 'shelved' ? '本记录已全部上架。' : '待上架量为当前查询值；进入作业后重新核实。' }}</p>
+      <router-link v-if="!['reversed', 'shelved'].includes(detail.status)" :to="{ path: '/m/jobs/putaway', query: { receipt_id: String(detail.id), movement_id: String(detail.receipt_movement_id), from: origin } }" class="mobile-button">手动上架此明细</router-link><section v-for="allocation in detail.allocations" :key="allocation.id" class="mobile-card"><h2>上架分配 {{ allocation.id }} {{ allocation.reversed_by_document_id ? '（已冲销）' : '' }}</h2><MobileReadFields :record="{ ...allocation, unit: detail.unit }" /><router-link :to="{ path: '/m/read/document/' + allocation.document_id, query: { from: origin } }" class="mobile-button">查看上架单据</router-link></section>
       <router-link :to="{ path: '/m/read/document/' + detail.id, query: { from: origin } }" class="mobile-button">查看原入库单据与流水</router-link>
     </template>
     <template v-if="route.params.kind === 'batch'"><router-link :to="{ path: '/m/records', query: { view: 'material', batch_id: String(detail.id) } }" class="mobile-button">查看本批次全部流水</router-link><p class="mobile-muted mobile-small">批次 ID 区分库位及供应商；累计入库保持历史口径，不能当作本次入库量。</p></template>

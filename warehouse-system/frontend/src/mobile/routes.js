@@ -23,7 +23,7 @@ export function visibleMobileActions(role, canOperate) {
 export function mobileLoginTarget(value) {
   if (typeof value !== 'string' || value.includes('\\') || /[\u0000-\u001f]/.test(value)) return '/m'
   const path = value.split(/[?#]/)[0]
-  if (/^\/m\/jobs\/receipt\/[\w-]{1,80}\/(form|confirm|result|choose)$/.test(path)) return value
+  if (/^\/m\/jobs\/(receipt|putaway)\/[\w-]{1,80}\/(form|confirm|result|choose)$/.test(path)) return value
   const paths = [...mobileNavigation.map(item => item.path), '/m/account/password', ...mobileActions.map(item => item.path)]
   return paths.includes(path) || ['/m/pending', '/m/locations', '/m/state-lab'].includes(path) || /^\/m\/read\/(batch|finished|receipt|document|count)\/[1-9]\d{0,9}$/.test(path) || /^\/m\/state-lab\/[\w-]{1,80}\/(form|confirm|result|context)$/.test(path) ? value : '/m'
 }
@@ -51,7 +51,9 @@ export const mobileRoutes = [
       { path: 'state-lab/:jobId([\\w-]{1,80})/:step(form|confirm|result|context)', component: () => import('./MobileTaskLab.vue'), meta: { title: 'S2 演练作业', mobileParent: '/m/state-lab', mobileTask: true, mobileLabTask: true } },
       { path: 'jobs/receipt', component: () => import('./MobileReceipt.vue'), meta: { title: '原料入库', mobileParent: '/m/jobs', mobileTask: true, mobileReceiptTask: true } },
       { path: 'jobs/receipt/:jobId([\\w-]{1,80})/:step(form|confirm|result|choose)', component: () => import('./MobileReceipt.vue'), meta: { title: '原料入库', mobileParent: '/m/jobs', mobileTask: true, mobileReceiptTask: true } },
-      ...mobileActions.filter(item => !['inventory', 'receipt'].includes(item.key)).map(item => ({
+      { path: 'jobs/putaway', component: () => import('./MobilePutaway.vue'), meta: { title: '原料手动上架', mobileParent: '/m/jobs', mobileTask: true, mobilePutawayTask: true } },
+      { path: 'jobs/putaway/:jobId([\\w-]{1,80})/:step(form|confirm|result|choose)', component: () => import('./MobilePutaway.vue'), meta: { title: '原料手动上架', mobileParent: '/m/jobs', mobileTask: true, mobilePutawayTask: true } },
+      ...mobileActions.filter(item => !['inventory', 'receipt', 'putaway'].includes(item.key)).map(item => ({
         path: `jobs/${item.key}`, component: pending,
         meta: { title: item.label, mobileParent: '/m/jobs', mobileTask: true, stage: item.stage },
       })),

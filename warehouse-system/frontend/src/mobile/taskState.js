@@ -1,12 +1,13 @@
 import { quantityText, quantityUnits } from '../quantity.js'
 import { receiptFields, receiptKind, receiptSnapshot, receiptSuccess, verifyReceipt } from './receipt.js'
+import { putawayFields, putawayKind, putawayRecord, putawaySnapshot, putawaySuccess, verifyPutawayReceipt } from './putaway.js'
 
 export const taskLabels = { draft: '草稿', submitting: '提交中', uncertain: '待核实', succeeded: '已成功', rejected: '明确拒绝' }
 export const lockedTask = task => ['submitting', 'uncertain', 'succeeded'].includes(task?.status)
 const copy = value => JSON.parse(JSON.stringify(value))
 const fieldsOnly = value => ({ quantity: String(value.quantity || '').slice(0, 80), location: String(value.location || '').slice(0, 80), notes: String(value.notes || '').slice(0, 300) })
 const dictionary = value => value && typeof value === 'object' && !Array.isArray(value)
-const allowedFields = (kind, value) => kind === receiptKind ? receiptFields(value) : fieldsOnly(value)
+const allowedFields = (kind, value) => kind === receiptKind ? receiptFields(value) : kind === putawayKind ? putawayFields(value) : fieldsOnly(value)
 function validTask(id, task) {
   if (!dictionary(task) || task.id !== id || !/^[\w-]{1,80}$/.test(id) || !Object.hasOwn(taskLabels, task.status) || typeof task.record !== 'string' || typeof task.kind !== 'string' || !dictionary(task.fields)) return false
   const keys = Object.keys(allowedFields(task.kind, {}))
@@ -18,6 +19,11 @@ function validTask(id, task) {
       try { receiptSnapshot(task.snapshot) } catch { return false }
       if (Object.keys(task.snapshot).some(field => field !== 'record' && !keys.includes(field))) return false
       if (task.status === 'succeeded' && (!dictionary(task.result) || !Number.isSafeInteger(task.result.id) || !Number.isSafeInteger(task.result.batchId))) return false
+    }
+    if (task.kind === putawayKind) {
+      try { putawaySnapshot(task.snapshot) } catch { return false }
+      if (task.record !== putawayRecord(task.snapshot) || Object.keys(task.snapshot).some(field => field !== 'record' && !keys.includes(field))) return false
+      if (task.status === 'succeeded' && (!dictionary(task.result) || !Number.isSafeInteger(task.result.id) || !Number.isSafeInteger(task.result.targetBatchId))) return false
     }
   }
   return true
@@ -69,8 +75,9 @@ export function createTaskStore({ storage, instance, user, newId, now = () => ne
       if (!healthy) throw new Error(warning)
       const quantity = quantityUnits(task.fields.quantity)
       if (quantity <= 0n || quantity > 99999999999999999999n) throw new Error('数量必须大于零且不超过十四位整数、六位小数')
-      if (task.kind !== receiptKind && !task.fields.location.trim()) throw new Error('请填写演练库位')
-      const normalized = task.kind === receiptKind ? receiptSnapshot(task.fields) : { ...task.fields, quantity: quantityText(quantity) }
+      if (![receiptKind, putawayKind].includes(task.kind) && !task.fields.location.trim()) throw new Error('请填写演练库位')
+      const normalized = task.kind === receiptKind ? receiptSnapshot(task.fields) : task.kind === putawayKind ? putawaySnapshot(task.fields) : { ...task.fields, quantity: quantityText(quantity) }
+      if (task.kind === putawayKind && task.record !== putawayRecord(normalized)) throw new Error('上架作业与入库明细不符')
       task.requestId ||= newId()
       task.snapshot = { record: task.record, ...normalized }
       task.status = 'submitting'; task.submittedAt = now(); task.reason = ''
@@ -81,7 +88,7 @@ export function createTaskStore({ storage, instance, user, newId, now = () => ne
       const task = find(id)
       // 迟到的明确成功仍可关闭待核实；拒绝只接受正在处理的明确响应。
       if (!task || !['submitting', 'uncertain'].includes(task.status) || !['succeeded', 'uncertain', 'rejected'].includes(status) || (task.status === 'uncertain' && status === 'rejected')) return false
-      const success = status === 'succeeded' && task.kind === receiptKind ? receiptSuccess(task, result) : null
+      const success = status !== 'succeeded' ? null : task.kind === receiptKind ? receiptSuccess(task, result) : task.kind === putawayKind ? putawaySuccess(task, result) : null
       task.status = status; task.reason = reason; task.finishedAt = now()
       if (status === 'succeeded') { task.fields = allowedFields(task.kind, {}); task.result = success || { label: '演练成功（未记账）', requestId: task.requestId } }
       persist(); return true
@@ -90,6 +97,20 @@ export function createTaskStore({ storage, instance, user, newId, now = () => ne
       const task = find(id)
       if (task?.kind !== receiptKind || task.status !== 'succeeded') throw new Error('尚无明确成功的入库请求')
       verifyReceipt(task, row); task.result.movementId = row.receipt_movement_id
+      persist(); return copy(task)
+    },
+    selectPutaway(id, row) {
+      const task = editable(id)
+      if (task.kind !== putawayKind) throw new Error('不是上架作业')
+      const fields = putawayFields({ receiptId: row.id, movementId: row.receipt_movement_id, sourceBatchId: row.batch_id, unit: row.unit })
+      verifyPutawayReceipt(fields, row, true)
+      const record = putawayRecord(fields)
+      const existing = Object.values(data.tasks).find(other => other.id !== id && other.kind === putawayKind && other.record === record && other.status !== 'succeeded')
+      if (existing) return copy(existing)
+      // 选择另一具体明细时，旧库位、数量、请求上下文一并清空。
+      if (task.record !== record) {
+        task.record = record; task.fields = fields; task.requestId = null; task.snapshot = null; task.status = 'draft'; task.reason = ''
+      }
       persist(); return copy(task)
     },
     suspend() {
