@@ -5,6 +5,7 @@ import { auth, restoreAuth } from './auth'
 import { mobileRoutes, loginLocation } from './mobile/routes'
 import { mobileStore, touchMobile } from './mobile/session'
 import { completedTaskLocation } from './mobile/navigation'
+import { configureMobileHomeScreen } from './mobile/homeScreen'
 
 const Dashboard = () => import('./views/Dashboard.vue')
 const Expiry = () => import('./views/Expiry.vue')
@@ -77,6 +78,9 @@ router.beforeEach(async (to, from) => {
       if (completed) return completed
     }
   } catch { return loginLocation(to) }
+})
+router.afterEach((to, from, failure) => {
+  if (!failure) configureMobileHomeScreen(document, Boolean(to.meta.mobile))
 })
 window.addEventListener('wms-auth-expired', () => {
   const current = router.currentRoute.value
