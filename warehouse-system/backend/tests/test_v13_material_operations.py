@@ -31,7 +31,8 @@ def test_10000_boxes_issue_2000_5000_3000_in_separate_visits(context):
     data['order'] = response.json()['data']
     material = data['order']['materials'][0]
     assert material['planned_required_quantity'] == '200'
-    for amount, cumulative in [('40', '40'), ('100', '140'), ('60', '200')]:
+    # 理论需求只作参考；达到200kg后仍可继续按实际量领料。
+    for amount, cumulative in [('40', '40'), ('100', '140'), ('60', '200'), ('10', '210')]:
         key = uuid4().hex
         result = post_material(data, 'issue', material['id'], [{'batch_id': data['batches'][0], 'quantity': amount}], role='workshop', request_id=key)
         assert result.status_code == 200, result.text
@@ -40,10 +41,10 @@ def test_10000_boxes_issue_2000_5000_3000_in_separate_visits(context):
         current = detail(data)
         assert current['materials'][0]['issued_quantity'] == cumulative
         assert current['materials'][0]['net_issued_quantity'] == cumulative
-    assert len(current['material_records']) == 3
+    assert len(current['material_records']) == 4
     assert current['status'] == 'in_progress'
     with Session(bind=context[2], join_transaction_mode='create_savepoint') as session:
-        assert session.get(MaterialBatch, data['batches'][0]).remaining_quantity == Decimal('50')
+        assert session.get(MaterialBatch, data['batches'][0]).remaining_quantity == Decimal('40')
         assert reconcile(session)['problems'] == []
 
 

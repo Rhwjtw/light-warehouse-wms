@@ -82,6 +82,19 @@ const action = reactive({ kind: 'issue', material: null, desired: '', unit: '', 
 let candidateGeneration = 0
 const actionTotal = computed(() => quantityText(action.allocations.reduce(
   (sum, row) => sum + (validQuantity(String(row.quantity)) ? quantityUnits(row.quantity) : 0n), 0n)))
+function cumulativeIssued(material) {
+  return quantityText(quantityUnits(material.issued_quantity) + quantityUnits(material.supplemented_quantity || '0'))
+}
+const currentIssueQuantity = computed(() => action.kind !== 'return' && validQuantity(action.desired)
+  ? quantityText(quantityUnits(action.desired)) : actionTotal.value)
+const projectedIssued = computed(() => {
+  if (!action.material || action.kind === 'return') return null
+  return quantityText(quantityUnits(cumulativeIssued(action.material)) + quantityUnits(currentIssueQuantity.value))
+})
+function clearAllocationQuantities() {
+  candidateGeneration++
+  action.allocations.forEach(row => { row.quantity = '' })
+}
 function remainingRequirement(material) {
   const remaining = quantityUnits(material.planned_required_quantity) - quantityUnits(material.net_issued_quantity)
   return quantityText(remaining > 0n ? remaining : 0n)
@@ -202,10 +215,11 @@ async function loadCandidates() {
   try {
     const params = validQuantity(action.desired) ? { quantity: action.desired } : {}
     const result = (await api.get(`/production-orders/${current.value.id}/materials/${action.material.material_id}/fefo-suggestion`, { params })).data
-    if (ticket !== candidateGeneration || desired !== action.desired) return
+    if (ticket !== candidateGeneration || desired !== action.desired) return false
     // Each visit starts with blank quantities; only an explicit current quantity is allocated.
     const suggestions = new Map(result.suggestions.map(row => [row.batch_id, row.quantity]))
     action.allocations = result.batches.map(row => ({ ...row, suggested_quantity: suggestions.get(row.id) || '0', quantity: desired ? suggestions.get(row.id) || '' : '' }))
+    return true
   } catch (e) { if (ticket === candidateGeneration) { error.value = e.message; action.allocations = [] } }
   finally { if (ticket === candidateGeneration) candidateLoading.value = false }
 }
@@ -216,22 +230,32 @@ async function applySuggestion() {
 }
 async function submitAction() {
   if (actionSaving.value || candidateLoading.value) return
-  if (action.allocations.some(row => String(row.quantity).trim() !== '' && !validQuantity(row.quantity))) {
-    error.value = '批次数量必须大于 0 且最多六位小数'; return
-  }
-  const allocations = action.allocations
-    .filter(row => validQuantity(row.quantity))
-    .map(row => ({ batch_id: row.batch_id ?? row.id, quantity: String(row.quantity) }))
-  if (!allocations.length) { error.value = '请至少填写一个批次的正数量'; return }
-  if (action.kind !== 'return' && action.desired && (!validQuantity(action.desired) || actionTotal.value !== quantityText(quantityUnits(action.desired)))) {
-    error.value = '批次数量合计须等于本次总量，请按本次数量分配，或清空总量后直接填写批次实际数量'; return
-  }
-  if (action.kind === 'return' && allocations.some(row => {
-    const candidate = action.allocations.find(item => (item.batch_id ?? item.id) === row.batch_id)
-    return quantityUnits(row.quantity) > quantityUnits(candidate.max_return)
-  })) { error.value = '退料数量不能超过该生产单在对应批次的累计净领出量'; return }
   actionSaving.value = true; error.value = ''
   try {
+    if (action.kind !== 'return' && action.desired) {
+      if (!validQuantity(action.desired)) { error.value = '请填写大于 0、最多六位小数的本次数量'; return }
+      // 只填总量即可确认；手动填过的批次仍按用户选择提交。
+      if (action.allocations.every(row => String(row.quantity).trim() === '')) {
+        if (!await loadCandidates()) return
+        if (actionTotal.value !== quantityText(quantityUnits(action.desired))) {
+          error.value = `可用库存不足，本次最多可领 ${amount(actionTotal.value, action.unit)}`; return
+        }
+      }
+    }
+    if (action.allocations.some(row => String(row.quantity).trim() !== '' && !validQuantity(row.quantity))) {
+      error.value = '批次数量必须大于 0 且最多六位小数'; return
+    }
+    const allocations = action.allocations
+      .filter(row => validQuantity(row.quantity))
+      .map(row => ({ batch_id: row.batch_id ?? row.id, quantity: String(row.quantity) }))
+    if (!allocations.length) { error.value = '请填写本次数量，或直接填写批次实际数量'; return }
+    if (action.kind !== 'return' && action.desired && (!validQuantity(action.desired) || actionTotal.value !== quantityText(quantityUnits(action.desired)))) {
+      error.value = '批次数量合计须等于本次总量，请按本次数量分配，或清空总量后直接填写批次实际数量'; return
+    }
+    if (action.kind === 'return' && allocations.some(row => {
+      const candidate = action.allocations.find(item => (item.batch_id ?? item.id) === row.batch_id)
+      return quantityUnits(row.quantity) > quantityUnits(candidate.max_return)
+    })) { error.value = '退料数量不能超过该生产单在对应批次的累计净领出量'; return }
     const payload = { order_material_id: action.material.id, unit: action.unit, allocations, notes: action.notes || null }
     // 同一弹窗内失败重试沿用请求标识；修改批次/数量/备注后 postingRequest 会生成新标识。
     await api.post(`/production-orders/${current.value.id}/${action.kind}`, postingRequest(action, payload, requestId))
@@ -308,9 +332,10 @@ onMounted(() => { load(); loadProducts() })
           <el-table-column prop="material_name" label="原材料" min-width="150" />
           <el-table-column label="单位用量" min-width="135"><template #default="{row}">{{ formatQuantity(row.quantity_per_unit) }}{{ row.bom_unit }} / {{ current.finished_product_unit }}</template></el-table-column>
           <el-table-column label="计划理论需求" min-width="145"><template #default="{row}"><span class="data-value">{{ amount(row.planned_required_quantity, row.base_unit) }}</span></template></el-table-column>
-          <el-table-column label="已领" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.issued_quantity, row.base_unit) }}</span></template></el-table-column>
+          <el-table-column label="累计领料" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.issued_quantity, row.base_unit) }}</span></template></el-table-column>
           <el-table-column label="补料" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.supplemented_quantity, row.base_unit) }}</span></template></el-table-column>
           <el-table-column label="退料" min-width="110"><template #default="{row}"><span class="data-value">{{ amount(row.returned_quantity, row.base_unit) }}</span></template></el-table-column>
+          <el-table-column label="累计已领（含补料）" min-width="160"><template #default="{row}"><strong class="data-value">{{ amount(cumulativeIssued(row), row.base_unit) }}</strong></template></el-table-column>
           <el-table-column label="当前净领用" min-width="145"><template #default="{row}"><strong class="data-value">{{ amount(row.net_issued_quantity, row.base_unit) }}</strong></template></el-table-column>
           <el-table-column v-if="canPostMaterial && ['ready','in_progress'].includes(current.status)" label="操作" width="175" fixed="right"><template #default="{row}"><el-button v-if="canPick" link type="primary" @click="openAction('issue',row)">领料</el-button><el-button v-if="canReplenish" link type="warning" @click="openAction('supplement',row)">补料</el-button><el-button v-if="canReturn" link type="success" @click="openAction('return',row)">退料</el-button></template></el-table-column>
         </el-table>
@@ -368,16 +393,17 @@ onMounted(() => { load(); loadProducts() })
 
   <el-dialog v-model="actionVisible" :title="`${actionNames[action.kind]} · ${action.material?.material_name || ''}`" width="820px" :close-on-click-modal="false" :close-on-press-escape="!actionSaving" :show-close="!actionSaving">
     <el-alert v-if="error" :title="error" type="error" show-icon class="dialog-feedback" />
-    <el-alert v-if="action.kind !== 'return'" title="支持今天领一点、明天继续领。填写本次原料数量后按批次分配，也可直接填写各批次实际数量；无需一次领满计划理论需求。" type="info" :closable="false" class="dialog-feedback" />
+    <el-alert v-if="action.kind !== 'return'" title="按实际需要填写本次数量，可多次领料，也可超过理论需求。直接确认会自动按批次分配；也可手动填写批次数量。每次成功领料都会累计。" type="info" :closable="false" class="dialog-feedback" />
     <el-alert v-else title="退料只能回到本生产单实际领用过的原批次，并且不能超过该批次累计净领出量。" type="info" :closable="false" class="dialog-feedback" />
     <div v-if="action.material" class="action-summary">
-      <span>理论 {{ amount(action.material.planned_required_quantity, action.unit) }}</span>
-      <span>已领 {{ amount(action.material.issued_quantity, action.unit) }}</span>
+      <span>理论需求（参考）{{ amount(action.material.planned_required_quantity, action.unit) }}</span>
+      <strong>累计已领（含补料）{{ amount(cumulativeIssued(action.material), action.unit) }}</strong>
       <span>当前净领用 {{ amount(action.material.net_issued_quantity, action.unit) }}</span>
       <span>理论缺口（参考）{{ amount(remainingRequirement(action.material), action.unit) }}</span>
-      <strong>本次合计 {{ amount(actionTotal, action.unit) }}</strong>
+      <strong>本次合计 {{ amount(currentIssueQuantity, action.unit) }}</strong>
+      <strong v-if="projectedIssued !== null">本次{{ actionNames[action.kind] }}后累计 {{ amount(projectedIssued, action.unit) }}（预计）</strong>
     </div>
-    <el-form v-if="action.kind !== 'return'" inline :disabled="actionSaving || candidateLoading" @submit.prevent="applySuggestion"><el-form-item label="本次原料总量"><el-input v-model="action.desired" inputmode="decimal" placeholder="仅填今天实际需要量" style="width:240px"><template #append>{{ action.unit }}</template></el-input></el-form-item><el-button @click="applySuggestion">按本次数量分配</el-button></el-form>
+    <el-form v-if="action.kind !== 'return'" inline :disabled="actionSaving || candidateLoading" @submit.prevent="submitAction"><el-form-item :label="`本次${actionNames[action.kind]}数量`"><el-input v-model="action.desired" @input="clearAllocationQuantities" inputmode="decimal" placeholder="填写本次实际数量，可直接确认" style="width:260px"><template #append>{{ action.unit }}</template></el-input></el-form-item><el-button @click="applySuggestion">预览批次分配</el-button></el-form>
     <TableSkeleton v-if="candidateLoading && !action.allocations.length" :rows="3" />
     <el-table v-else :data="action.allocations" v-loading="candidateLoading" border>
       <el-table-column prop="batch_no" label="批次" min-width="150" />
