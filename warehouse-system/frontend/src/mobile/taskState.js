@@ -1,4 +1,5 @@
 import { stockKinds, stockFields, stockSnapshot, stockSuccess, stockRecord } from './stockJobs.js'
+import { locationKinds, locationFields, locationSnapshot, locationSuccess, locationRecord } from './locationJobs.js'
 import { quantityText, quantityUnits } from '../quantity.js'
 import { receiptFields, receiptKind, receiptSnapshot, receiptSuccess, verifyReceipt } from './receipt.js'
 import { putawayFields, putawayKind, putawayRecord, putawaySnapshot, putawaySuccess, verifyPutawayReceipt } from './putaway.js'
@@ -8,14 +9,14 @@ export const lockedTask = task => ['submitting', 'uncertain', 'succeeded'].inclu
 const copy = value => JSON.parse(JSON.stringify(value))
 const fieldsOnly = value => ({ quantity: String(value.quantity || '').slice(0, 80), location: String(value.location || '').slice(0, 80), notes: String(value.notes || '').slice(0, 300) })
 const dictionary = value => value && typeof value === 'object' && !Array.isArray(value)
-const allowedFields = (kind, value) => kind === receiptKind ? receiptFields(value) : kind === putawayKind ? putawayFields(value) : stockKinds.includes(kind) ? stockFields(value) : fieldsOnly(value)
+const allowedFields = (kind, value) => locationKinds.includes(kind) ? locationFields(kind, value) : kind === receiptKind ? receiptFields(value) : kind === putawayKind ? putawayFields(value) : stockKinds.includes(kind) ? stockFields(value) : fieldsOnly(value)
 function validTask(id, task) {
   if (!dictionary(task) || task.id !== id || !/^[\w-]{1,80}$/.test(id) || !Object.hasOwn(taskLabels, task.status) || typeof task.record !== 'string' || typeof task.kind !== 'string' || !dictionary(task.fields)) return false
   const keys = Object.keys(allowedFields(task.kind, {}))
   if (!keys.every(field => (field === 'allocations' && stockKinds.includes(task.kind) ? Array.isArray(task.fields[field]) && task.fields[field].length <= 100 && task.fields[field].every(a => dictionary(a) && Object.keys(a).length === 3 && ['batchId', 'scope', 'quantity'].every(k => typeof a[k] === 'string')) : typeof task.fields[field] === 'string')) || Object.keys(task.fields).some(field => !keys.includes(field))) return false
   if (['submitting', 'uncertain', 'succeeded', 'rejected'].includes(task.status)) {
     if (typeof task.requestId !== 'string' || !dictionary(task.snapshot) || task.snapshot.record !== task.record) return false
-    try { if (quantityUnits(task.snapshot.quantity) <= 0n) return false } catch { return false }
+    try { if (quantityUnits(task.snapshot.quantity) < (task.kind === 'material-count' ? 0n : 1n)) return false } catch { return false }
     if (task.kind === receiptKind) {
       try { receiptSnapshot(task.snapshot) } catch { return false }
       if (Object.keys(task.snapshot).some(field => field !== 'record' && !keys.includes(field))) return false
@@ -34,6 +35,14 @@ function validTask(id, task) {
       if (task.record !== stockRecord(task.kind, task.snapshot) || JSON.stringify(stockFields(task.snapshot).allocations) !== JSON.stringify(task.snapshot.allocations)) return false
       if (Object.keys(task.snapshot).some(k => k !== 'record' && !keys.includes(k))) return false
       if (task.status === 'succeeded' && (!dictionary(task.result) || !Number.isSafeInteger(task.result.id) || !Array.isArray(task.result.batchIds) || !task.result.batchIds.every(id => Number.isSafeInteger(id) && id > 0))) return false
+    }
+  }
+  if (locationKinds.includes(task.kind)) {
+    if (JSON.stringify(task.fields) !== JSON.stringify(locationFields(task.kind, task.fields))) return false
+    if (task.snapshot) {
+      try { locationSnapshot(task.kind, task.snapshot, task.snapshot.bookQuantity) } catch { return false }
+      if (task.record !== locationRecord(task.snapshot) || Object.keys(task.snapshot).some(k => k !== 'record' && !(task.kind === 'material-count' && k === 'bookQuantity') && !keys.includes(k))) return false
+      if (task.status === 'succeeded' && (!dictionary(task.result) || !Number.isSafeInteger(task.result.id) || (task.kind === 'material-transfer' && !Number.isSafeInteger(task.result.targetBatchId)))) return false
     }
   }
   return true
@@ -79,14 +88,15 @@ export function createTaskStore({ storage, instance, user, newId, now = () => ne
       if (JSON.stringify(next) !== JSON.stringify(task.fields)) { task.requestId = null; task.snapshot = null; task.status = 'draft'; task.reason = '' }
       task.fields = next; persist(); return copy(task)
     },
-    begin(id, { ready, allowed }) {
+    begin(id, { ready, allowed, bookQuantity }) {
       const task = editable(id)
       if (!ready || !allowed) throw new Error('请先核实登录、权限及当前记录')
       if (!healthy) throw new Error(warning)
       const quantity = quantityUnits(task.fields.quantity)
-      if (quantity <= 0n || quantity > 99999999999999999999n) throw new Error('数量必须大于零且不超过十四位整数、六位小数')
-      if (![receiptKind, putawayKind, ...stockKinds].includes(task.kind) && !task.fields.location.trim()) throw new Error('请填写演练库位')
-      const normalized = task.kind === receiptKind ? receiptSnapshot(task.fields) : task.kind === putawayKind ? putawaySnapshot(task.fields) : stockKinds.includes(task.kind) ? stockSnapshot(task.kind, task.fields) : { ...task.fields, quantity: quantityText(quantity) }
+      if (quantity < (task.kind === 'material-count' ? 0n : 1n) || quantity > 99999999999999999999n) throw new Error('数量无效，最多十四位整数、六位小数')
+      if (![receiptKind, putawayKind, ...stockKinds, ...locationKinds].includes(task.kind) && !task.fields.location.trim()) throw new Error('请填写演练库位')
+      const normalized = locationKinds.includes(task.kind) ? locationSnapshot(task.kind, task.fields, bookQuantity) : task.kind === receiptKind ? receiptSnapshot(task.fields) : task.kind === putawayKind ? putawaySnapshot(task.fields) : stockKinds.includes(task.kind) ? stockSnapshot(task.kind, task.fields) : { ...task.fields, quantity: quantityText(quantity) }
+      if (locationKinds.includes(task.kind) && task.record !== locationRecord(normalized)) throw new Error('作业与具体库位批次不符')
       if (stockKinds.includes(task.kind) && task.record !== stockRecord(task.kind, normalized)) throw new Error('作业与具体库存身份不符')
       if (task.kind === putawayKind && task.record !== putawayRecord(normalized)) throw new Error('上架作业与入库明细不符')
       task.requestId ||= newId()
@@ -99,7 +109,7 @@ export function createTaskStore({ storage, instance, user, newId, now = () => ne
       const task = find(id)
       // 迟到的明确成功仍可关闭待核实；拒绝只接受正在处理的明确响应。
       if (!task || !['submitting', 'uncertain'].includes(task.status) || !['succeeded', 'uncertain', 'rejected'].includes(status) || (task.status === 'uncertain' && status === 'rejected')) return false
-      const success = status !== 'succeeded' ? null : task.kind === receiptKind ? receiptSuccess(task, result) : task.kind === putawayKind ? putawaySuccess(task, result) : stockKinds.includes(task.kind) ? stockSuccess(task, result) : null
+      const success = status !== 'succeeded' ? null : locationKinds.includes(task.kind) ? locationSuccess(task, result) : task.kind === receiptKind ? receiptSuccess(task, result) : task.kind === putawayKind ? putawaySuccess(task, result) : stockKinds.includes(task.kind) ? stockSuccess(task, result) : null
       task.status = status; task.reason = reason; task.finishedAt = now()
       if (status === 'succeeded') { task.fields = allowedFields(task.kind, {}); task.result = success || { label: '演练成功（未记账）', requestId: task.requestId } }
       persist(); return true
@@ -114,6 +124,15 @@ export function createTaskStore({ storage, instance, user, newId, now = () => ne
       const task = editable(id)
       if (!stockKinds.includes(task.kind)) throw new Error('不是S5作业')
       const next = stockFields(fields), record = stockRecord(task.kind, next)
+      const existing = Object.values(data.tasks).find(other => other.id !== id && other.kind === task.kind && other.record === record && other.status !== 'succeeded')
+      if (existing) return copy(existing)
+      task.record = record; task.fields = next; task.status = 'draft'; task.requestId = null; task.snapshot = null; task.reason = ''
+      persist(); return copy(task)
+    },
+    selectLocation(id, fields) {
+      const task = editable(id)
+      if (!locationKinds.includes(task.kind)) throw new Error('不是移库或盘点作业')
+      const next = locationFields(task.kind, fields), record = locationRecord(next)
       const existing = Object.values(data.tasks).find(other => other.id !== id && other.kind === task.kind && other.record === record && other.status !== 'succeeded')
       if (existing) return copy(existing)
       task.record = record; task.fields = next; task.status = 'draft'; task.requestId = null; task.snapshot = null; task.reason = ''
