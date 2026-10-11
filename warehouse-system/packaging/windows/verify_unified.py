@@ -50,7 +50,7 @@ def main():
     p.add_argument('--installer',type=Path)
     p.add_argument('--legacy-installer',type=Path)
     p.add_argument('--legacy-upgrader',type=Path)
-    p.add_argument('--previous-unified-installer',type=Path)
+    p.add_argument('--previous-unified-installer',type=Path,action='append',default=[])
     p.add_argument('--output',type=Path)
     p.add_argument('--fault-root',type=Path)
     p.add_argument('--fault-payload',type=Path)
@@ -115,13 +115,13 @@ def main():
     def summaries(root):
         return [json.loads(x.read_text(encoding='utf-8')) for x in (root/'data/upgrade-backups').glob('*/report.json')]
     # Fresh full installer: 3172 file hashes, initialization, inventory, BOM and restore.
-    fresh=out/'fresh'
+    fresh=out/'自选路径 新安装'
     shortcut=Path(os.environ['USERPROFILE'])/'Desktop/轻仓 WMS 独立版.lnk'
     assert not shortcut.exists(),'Preserve an existing desktop shortcut'
     install(installer,fresh,'fresh-install',desktop=True)
-    script="$s=(New-Object -ComObject WScript.Shell).CreateShortcut('"+str(shortcut)+"'); if($s.TargetPath -ne '"+str(fresh/'轻仓WMS.exe')+"' -or $s.WorkingDirectory -ne '"+str(fresh)+"' -or $s.IconLocation -notin @('',',0')){throw 'Desktop shortcut mismatch'}; $v=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{924D0ED8-98CF-4BBF-B1F2-EE1E1D695B72}_is1').DisplayVersion; if($v -ne '1.3.1'){throw 'Installer version mismatch'}"
+    script="$s=(New-Object -ComObject WScript.Shell).CreateShortcut('"+str(shortcut)+"'); if($s.TargetPath -ne '"+str(fresh/'轻仓WMS.exe')+"' -or $s.WorkingDirectory -ne '"+str(fresh)+"' -or $s.IconLocation -notin @('',',0')){throw 'Desktop shortcut mismatch'}; $v=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{924D0ED8-98CF-4BBF-B1F2-EE1E1D695B72}_is1').DisplayVersion; if($v -ne '1.3.2'){throw 'Installer version mismatch'}"
     execute(['powershell.exe','-NoProfile','-Command',script],'desktop-shortcut-check.log')
-    report['checks'].append('actual desktop shortcut targets the icon-embedded EXE; installation registers version 1.3.1')
+    report['checks'].append('actual desktop shortcut targets the icon-embedded EXE; installation registers version 1.3.2')
     report['roots'].append(str(fresh))
     execute([APP/'backend/.venv/Scripts/python.exe',Path(__file__).parent/'verify_package.py',
         '--install-root',fresh,'--report',out/'fresh-acceptance/report.json'],'fresh-acceptance-run.log')
@@ -142,17 +142,18 @@ def main():
     report['checks'].append('official V1.2 -> unified EXE V1.3 preserves all 26 tables/config/grants and five original roles; new business and restore pass')
     uninstall(root,'ordinary-uninstall')
     # Verify the previous full installer can update real data to the changed desktop frontend.
-    if args.previous_unified_installer:
-        previous=args.previous_unified_installer.resolve()
+    for index, previous_arg in enumerate(args.previous_unified_installer):
+        previous=previous_arg.resolve()
+        label='previous-unified-'+str(index)
         assert previous.is_relative_to(APP/'.runtime')
-        root=out/'previous-unified'
-        install(previous,root,'previous-unified-install')
+        root=out/label
+        install(previous,root,label+'-install')
         report['roots'].append(str(root))
         credentials,product=seed(root)
         manifest_path=root/'package-manifest.json'
         original_manifest=manifest_path.read_bytes()
         original=json.loads(original_manifest)
-        assert original['version']=='1.3.0'
+        assert original['version'] in ('1.3.0','1.3.1')
         cfg_hash=hashlib.sha256((root/'data/config.json').read_bytes()).hexdigest()
         # A forged local inventory must not bypass the approved published-source inventory.
         index=root/'frontend/dist/index.html'
@@ -162,25 +163,26 @@ def main():
         forged['files']['frontend/dist/index.html']=hashlib.sha256(index.read_bytes()).hexdigest()
         manifest_path.write_text(json.dumps(forged),encoding='utf-8')
         forged_bytes=manifest_path.read_bytes()
-        install(installer,root,'previous-unified-forged-source',auto=True,expected=7)
+        install(installer,root,label+'-forged-source',auto=True,expected=7)
         assert manifest_path.read_bytes()==forged_bytes and index.read_bytes()!=original_index
         assert hashlib.sha256((root/'data/config.json').read_bytes()).hexdigest()==cfg_hash
         assert not (root/'data/upgrade-in-progress.json').exists()
         index.write_bytes(original_index); manifest_path.write_bytes(original_manifest)
-        install(installer,root,'previous-unified-update-auto',auto=True)
+        install(installer,root,label+'-update-auto',auto=True)
         updated=json.loads(manifest_path.read_text(encoding='utf-8'))
-        assert updated['version']=='1.3.1' and updated['frontend_profile']['name']=='desktop-quantity-v13'
+        assert updated['version']=='1.3.2' and updated['frontend_profile']['name']=='desktop-issue-total-v13'
         assert updated['files']['frontend/dist/index.html']!=original['files']['frontend/dist/index.html']
         old_backend={k:v for k,v in original['files'].items() if k.startswith('backend/')}
         new_backend={k:v for k,v in updated['files'].items() if k.startswith('backend/')}
-        assert old_backend==new_backend
+        assert old_backend.keys()==new_backend.keys()
+        assert {k for k in old_backend if old_backend[k]!=new_backend[k]} == {'backend/app/config.py','backend/app/schemas.py','backend/scripts/init_admin.py'}
         success=[x for x in summaries(root) if x.get('source_revision')=='0015' and x.get('historical_rows_unchanged')]
         assert success and success[-1]['before']==success[-1]['after']
         login_check(root,credentials,product)
-        install(installer,root,'previous-unified-repeat-auto',auto=True)
+        install(installer,root,label+'-repeat-auto',auto=True)
         assert any(x.get('already_current') for x in summaries(root))
-        report['checks'].append('previous full V1.3 -> V1.3.1 finds original directory, changes only approved desktop frontend, retains account/5.123456 stock/config/grants; repeat is idempotent; forged source inventory refused')
-        uninstall(root,'previous-unified-uninstall')
+        report['checks'].append('previous full '+original['version']+' -> V1.3.2 finds original directory, updates approved desktop frontend and standalone password policy, retains account/5.123456 stock/config/grants; repeat is idempotent; forged source inventory refused')
+        uninstall(root,label+'-uninstall')
     # A historical V1.3 thin updater creates non-NULL purposes; the full installer must retain them.
     if args.legacy_upgrader:
         root=fixture('existing-v13')

@@ -69,9 +69,9 @@ def main():
     manifest = json.loads((root / 'package-manifest.json').read_text(encoding='utf-8'))
     for relative, digest in manifest['files'].items():
         assert hashlib.sha256((root / relative).read_bytes()).hexdigest() == digest, relative
-    expected_revision = '0015' if manifest['version'] in ('1.3.0','1.3.1') else '0014'
+    expected_revision = '0015' if manifest['version'] in ('1.3.0','1.3.1','1.3.2') else '0014'
     report = {'checks': ['package file hashes verified'], 'business_baseline': manifest['business_baseline']}
-    credentials = {'username': 'installadmin', 'password': '安装验收密码' + secrets.token_urlsafe(24)}
+    credentials = {'username': 'installadmin', 'password': secrets.token_hex(2) if manifest['version']=='1.3.2' else '安装验收密码' + secrets.token_urlsafe(24)}
     controller = None
     token = None
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -93,6 +93,14 @@ def main():
         return result['data']
 
     try:
+        if manifest['version']=='1.3.2':
+            # Invalid first passwords fail before MySQL initialization.
+            for invalid in ('123', '12345678901'):
+                result=subprocess.run([str(root/'python/python.exe'),'-I',str(root/'controller/runtime.py'),'run',str(root/'data')],
+                    input=json.dumps(dict(username='installadmin',password=invalid))+'\n',capture_output=True,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW)
+                assert result.returncode==1 and '密码需为4～10' in result.stdout
+                assert not (root/'data/mysql').exists()
+            report['checks'].append('initial password 3/11 characters refused before MySQL starts')
         controller = Controller(root, credentials)
         cfg = json.loads((root / 'data/config.json').read_text(encoding='utf-8'))
         assert cfg['ready'] and cfg['mysql_port'] != 3306 and cfg['web_port'] != 80
@@ -113,6 +121,24 @@ def main():
                 assert cursor.fetchone()[0] == 5
         report['checks'].append('fresh database, five roles, random separate database accounts, empty inventory')
         token = request('POST', '/api/auth/login', credentials)['access_token']
+        if manifest['version']=='1.3.2':
+            roles=request('GET','/api/roles')
+            admin_role=next(r['id'] for r in roles if r['code']=='admin')
+            for password in ('123', '12345678901'):
+                request('POST','/api/users',dict(username='invalidlength',display_name='长度边界',password=password,role_id=admin_role),422)
+            created=request('POST','/api/users',dict(username='passwordtest',display_name='密码验收',password=secrets.token_hex(5),role_id=admin_role))
+            request('POST','/api/users/'+str(created['id'])+'/password',dict(new_password=secrets.token_hex(2)))
+            for password in ('123', '12345678901'):
+                request('POST','/api/auth/password',dict(current_password=credentials['password'],new_password=password),422)
+            new_password=secrets.token_hex(5)
+            request('POST','/api/auth/password',dict(current_password=credentials['password'],new_password=new_password))
+            request('GET','/api/auth/me',expected=401)
+            credentials['password']=new_password
+            token=request('POST','/api/auth/login',credentials)['access_token']
+            request('POST','/api/auth/password',dict(current_password=new_password,new_password='1234'))
+            credentials['password']='1234'
+            token=request('POST','/api/auth/login',credentials)['access_token']
+            report['checks'].append('4-digit initial login; 10-character create/change, 4-character reset/change, 3/11 refusal and old token revocation pass')
         for path in ('/api/auth/me', '/api/material-stock', '/api/finished-stock', '/api/production-orders',
                      '/api/traceability/search?q=install', '/api/roles'):
             request('GET', path)

@@ -21,7 +21,7 @@ def main():
     parser.add_argument('--mysql', type=Path, required=True)
     parser.add_argument('--redist', type=Path, required=True)
     parser.add_argument('--baseline', required=True)
-    parser.add_argument('--version', default='1.3.1')
+    parser.add_argument('--version', default='1.3.2')
     parser.add_argument('--source-profile', type=Path)
     args = parser.parse_args()
     target = args.output.resolve()

@@ -1,4 +1,4 @@
-"""Verified standalone V1.2/V1.3 -> V1.3.1 maintenance; preserve existing data."""
+"""Verified standalone V1.2/V1.3 -> V1.3.2 maintenance; preserve existing data."""
 import argparse
 import hashlib
 import json
@@ -215,7 +215,7 @@ def perform_normal(root, archive):
         verify_files(root, old['files'])
         with zipfile.ZipFile(archive) as package:
             new = json.loads(package.read('upgrade-manifest.json'))
-            if new['version'] != '1.3.1' or new['revision'] != '0015':
+            if new['version'] != '1.3.2' or new['revision'] != '0015':
                 raise Refusal(1)
             already = (old.get('version') == new['version'] and old.get('business_baseline') == new['business_baseline']
                        and all(old['files'].get(k) == v for k, v in new['files'].items()))
@@ -258,7 +258,7 @@ def perform_normal(root, archive):
                 with con.cursor() as cur:
                     cur.execute('SELECT version_num FROM alembic_version')
                     versions = cur.fetchall()
-            source_revision = '0015' if old.get('version') in ('1.3.0','1.3.1') else '0014'
+            source_revision = '0015' if old.get('version') in ('1.3.0','1.3.1','1.3.2') else '0014'
             if versions != ((source_revision,),):
                 raise Refusal(3)
             report['phase'] = 'before_check'
@@ -344,7 +344,7 @@ def write_report(path, value):
 def load_payload(archive):
     with zipfile.ZipFile(archive) as package:
         new = json.loads(package.read('upgrade-manifest.json'))
-        if new.get('version') != '1.3.1' or new.get('revision') != '0015':
+        if new.get('version') != '1.3.2' or new.get('revision') != '0015':
             raise Refusal(1)
         names = set(new['files']) | {'upgrade-manifest.json'}
         if len(package.infolist()) != len(names) or set(package.namelist()) != names:
@@ -362,7 +362,7 @@ def accepted_manifest(old, new):
         raise Refusal(1)
     if old.get('version') == '1.2.0' and old.get('business_baseline') in OLD_BASELINES:
         return
-    if old.get('version') in ('1.3.0', '1.3.1'):
+    if old.get('version') in ('1.3.0', '1.3.1', '1.3.2'):
         business = {k:v for k,v in old['files'].items() if k.startswith(('backend/', 'frontend/'))}
         target = {k:v for k,v in new['files'].items() if k.startswith(('backend/', 'frontend/'))}
         if old.get('version') == new['version'] and old.get('business_baseline') == new['business_baseline'] and business == target:

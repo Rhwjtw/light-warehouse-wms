@@ -18,15 +18,19 @@ ENV = Path(__file__).resolve().parents[1] / '.env'
 USERNAME_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$')
 
 
-def ensure_initial_admin(session, *, username: str, display_name: str, password: str) -> bool:
+def ensure_initial_admin(session, *, username: str, display_name: str, password: str, standalone: bool = False) -> bool:
     if not USERNAME_PATTERN.fullmatch(username):
         raise ValueError('管理员用户名需为 3～64 位字母、数字、点、下划线或连字符')
     if not 1 <= len(display_name) <= 80:
         raise ValueError('管理员显示名称需为 1～80 个字符')
-    if not 14 <= len(password) <= 128:
-        raise ValueError('初始管理员密码需为 14～128 个字符')
-    if password.lower() in {'password', 'admin123456789', '12345678901234'} or username.lower() in password.lower():
-        raise ValueError('初始管理员密码过于简单，且不能包含用户名')
+    if standalone:
+        if not 4 <= len(password) <= 10:
+            raise ValueError('独立版管理员密码需为 4～10 个字符')
+    else:
+        if not 14 <= len(password) <= 128:
+            raise ValueError('初始管理员密码需为 14～128 个字符')
+        if password.lower() in {'password', 'admin123456789', '12345678901234'} or username.lower() in password.lower():
+            raise ValueError('初始管理员密码过于简单，且不能包含用户名')
 
     role = session.scalar(select(Role).where(Role.code == 'admin').with_for_update())
     if role is None:

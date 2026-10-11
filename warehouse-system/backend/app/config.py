@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     business_timezone: str = 'Asia/Shanghai'
     auth_secret: SecretStr = SecretStr('')
     auth_token_hours: int = Field(default=8, ge=1, le=24)
+    standalone_password_policy: bool = False
     api_docs_enabled: bool = True
     serve_frontend: bool = False
     frontend_dist: Path = Path('../frontend/dist')

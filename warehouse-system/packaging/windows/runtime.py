@@ -93,6 +93,7 @@ def environment(config):
         'MYSQL_USER': 'wms_app', 'MYSQL_PASSWORD': config['app_password'],
         'MYSQL_MIGRATION_USER': 'wms_migrator', 'MYSQL_MIGRATION_PASSWORD': config['migration_password'],
         'AUTH_SECRET': config['auth_secret'], 'AUTH_TOKEN_HOURS': '8',
+        'STANDALONE_PASSWORD_POLICY': 'true',
         'BUSINESS_TIMEZONE': 'Asia/Shanghai', 'CORS_ORIGINS': '[]',
         'API_DOCS_ENABLED': 'false', 'SERVE_FRONTEND': 'true',
         'FRONTEND_DIST': str(ROOT / 'frontend' / 'dist'), 'LOG_LEVEL': 'INFO',
@@ -195,7 +196,7 @@ def initialize(config, data, credentials):
     from app.database import SessionLocal
     with SessionLocal.begin() as session:
         ensure_initial_admin(session, username=credentials['username'], display_name='系统管理员',
-                             password=credentials['password'])
+                             password=credentials['password'], standalone=True)
     config['ready'] = True
     save_config(data / 'config.json', config)
 
@@ -259,8 +260,7 @@ def run(data):
             import re
             username, password = credentials.get('username', ''), credentials.get('password', '')
             if (not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{2,63}', username) or
-                    not 14 <= len(password) <= 128 or username.lower() in password.lower() or
-                    password.lower() in {'password', 'admin123456789', '12345678901234'}):
+                    not isinstance(password, str) or not 4 <= len(password) <= 10):
                 raise RuntimeError('INVALID_INITIAL_ADMIN')
         environment(config)
         mysql = server = None
@@ -357,6 +357,8 @@ if __name__ == '__main__':
         message = '系统启动或停止失败，请查看安装目录data中的日志；原数据保留。'
         if isinstance(exc, RuntimeError) and str(exc) == 'UPGRADE_INCOMPLETE_DATA_PRESERVED':
             message = '检测到上次安装升级未完成。请重新运行最新完整安装包，程序会核验并尝试继续；原数据保留。'
+        elif isinstance(exc, RuntimeError) and str(exc) == 'INVALID_INITIAL_ADMIN':
+            message = '请检查管理员用户名和密码：密码需为4～10个字符，可使用纯数字。'
         elif isinstance(exc, RuntimeError) and str(exc) == 'DATABASE_UPGRADE_REQUIRED':
             message = '程序与数据库版本尚未匹配，请运行最新完整安装包完成升级；原数据保留。'
         event('error', message=message, error=type(exc).__name__,

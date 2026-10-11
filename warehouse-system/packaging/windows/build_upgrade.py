@@ -19,7 +19,7 @@ def main():
         if not source.is_relative_to(APP/'.runtime'):
             raise RuntimeError('Source package must be isolated')
         manifest=json.loads((source/'package-manifest.json').read_text(encoding='utf-8'))
-        if manifest['version']!='1.3.1' or manifest['business_baseline']!=args.baseline:
+        if manifest['version']!='1.3.2' or manifest['business_baseline']!=args.baseline:
             raise RuntimeError('Full package version/baseline mismatch')
         for name in ('backend','frontend','controller'):
             shutil.copytree(source/name,target/name)
@@ -54,7 +54,7 @@ def main():
     assert all(not k.startswith(('data/','python/','mysql/')) and not Path(k).name.startswith('.env') for k in files)
     profile=manifest.get('frontend_profile') if args.from_package else None
     compatibility=json.loads((Path(__file__).parent/'profiles/compatible-v13.json').read_text(encoding='utf-8'))
-    manifest=dict(version='1.3.1',revision='0015',business_baseline=args.baseline,files=files,
+    manifest=dict(version='1.3.2',revision='0015',business_baseline=args.baseline,files=files,
         frontend_profile=profile,compatible_v13=compatibility)
     archive=target.parent/'wms-upgrade.zip'
     with zipfile.ZipFile(archive,'x',compression=zipfile.ZIP_DEFLATED) as output:

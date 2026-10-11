@@ -51,3 +51,21 @@ def test_initial_admin_is_idempotent_and_does_not_reset_password():
             assert second_hash == first_hash
         finally:
             transaction.rollback()
+
+
+def test_standalone_initial_admin_accepts_numeric_short_password_without_changing_default():
+    username = 'standalone_' + uuid4().hex[:12]
+    with SessionLocal() as session:
+        transaction = session.begin()
+        try:
+            with pytest.raises(ValueError):
+                ensure_initial_admin(session, username=username, display_name='独立版', password='1234')
+            for password in ('123', '12345678901'):
+                with pytest.raises(ValueError):
+                    ensure_initial_admin(session, username=username, display_name='独立版', password=password, standalone=True)
+            assert ensure_initial_admin(session, username=username, display_name='独立版', password='1234', standalone=True)
+            first_hash = session.scalar(select(User.password_hash).where(User.username == username))
+            assert not ensure_initial_admin(session, username=username, display_name='独立版', password='1234567890', standalone=True)
+            assert first_hash == session.scalar(select(User.password_hash).where(User.username == username))
+        finally:
+            transaction.rollback()

@@ -11,7 +11,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("轻仓 WMS 独立版")]
 [assembly: AssemblyProduct("轻仓 WMS 独立版")]
-[assembly: AssemblyVersion("1.3.1.0")]
+[assembly: AssemblyVersion("1.3.2.0")]
 
 internal class Client : Form
 {
@@ -19,8 +19,8 @@ internal class Client : Form
     readonly JavaScriptSerializer json = new JavaScriptSerializer();
     readonly Label status = new Label { Left=24, Top=22, Width=540, Height=52 };
     readonly TextBox username = new TextBox { Left=150, Top=88, Width=370, Text="admin", MaxLength=64 };
-    readonly TextBox password = new TextBox { Left=150, Top=126, Width=370, UseSystemPasswordChar=true, MaxLength=128 };
-    readonly TextBox confirm = new TextBox { Left=150, Top=164, Width=370, UseSystemPasswordChar=true, MaxLength=128 };
+    readonly TextBox password = new TextBox { Left=150, Top=126, Width=370, UseSystemPasswordChar=true, MaxLength=10 };
+    readonly TextBox confirm = new TextBox { Left=150, Top=164, Width=370, UseSystemPasswordChar=true, MaxLength=10 };
     readonly Button start = new Button { Left=24, Top=222, Width=130, Height=36, Text="启动系统" };
     readonly Button open = new Button { Left=166, Top=222, Width=130, Height=36, Text="打开系统", Enabled=false };
     readonly Button backup = new Button { Left=308, Top=222, Width=110, Height=36, Text="备份数据", Enabled=false };
@@ -52,7 +52,7 @@ internal class Client : Form
             new Label {Left=24,Top=92,Width=120,Text="管理员用户名"},
             new Label {Left=24,Top=130,Width=120,Text="管理员密码"},
             new Label {Left=24,Top=168,Width=120,Text="再次输入密码"}});
-        status.Text="首次启动请设置管理员密码（14～128 位，不能包含用户名）。\n此独立版使用本机的新数据库。";
+        status.Text="首次启动请设置管理员密码（4～10 位，支持纯数字）。\n此独立版使用本机的新数据库。";
         start.Click += (s,e) => StartSystem(); open.Click += (s,e) => OpenBrowser();
         backup.Click += (s,e) => { backup.Enabled=false; status.Text="正在备份，请稍候…"; controller.StandardInput.WriteLine("backup"); };
         stop.Click += async (s,e) => await StopSystem();
@@ -86,9 +86,9 @@ internal class Client : Form
     void StartSystem()
     {
         if (working || (controller != null && !controller.HasExited)) return;
-        if (password.Enabled && (password.Text != confirm.Text || password.Text.Length<14 ||
-            username.Text.Length<3 || password.Text.ToLowerInvariant().Contains(username.Text.ToLowerInvariant()))) {
-            MessageBox.Show("请检查用户名、密码长度和两次输入。密码至少 14 位，且不能包含用户名。",Text); return;
+        if (password.Enabled && (password.Text != confirm.Text || password.Text.Length<4 || password.Text.Length>10 ||
+            username.Text.Trim().Length<3)) {
+            MessageBox.Show("请检查用户名、密码长度和两次输入。密码为 4～10 位，可使用纯数字。",Text); return;
         }
         try {
             working=true; startupError=false; start.Enabled=false; stop.Enabled=false;

@@ -2,6 +2,8 @@ from decimal import Decimal
 from datetime import date
 from typing import Annotated, Any, Literal
 
+from app.config import get_settings
+
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, model_validator
 
 
@@ -22,7 +24,9 @@ UnitCode = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1,
                                            pattern=r'^[^\x00-\x1f\x7f]+$')]
 Username = Annotated[str, StringConstraints(min_length=3, max_length=64, pattern=r'^[A-Za-z0-9][A-Za-z0-9_.-]*$')]
 # 不裁剪密码；用户输入的空格也是密码的一部分。
-Password = Annotated[str, StringConstraints(strip_whitespace=False, min_length=10, max_length=128)]
+_standalone_passwords = get_settings().standalone_password_policy
+Password = Annotated[str, StringConstraints(strip_whitespace=False,
+    min_length=4 if _standalone_passwords else 10, max_length=10 if _standalone_passwords else 128)]
 
 
 def exact_decimal(value):

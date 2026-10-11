@@ -10,7 +10,7 @@
 [Setup]
 AppId={{924D0ED8-98CF-4BBF-B1F2-EE1E1D695B72}
 AppName=轻仓 WMS 独立版
-AppVersion=1.3.1
+AppVersion=1.3.2
 AppPublisher=宋子豪
 DefaultDirName={localappdata}\LightWarehouseWMS
 DefaultGroupName=轻仓 WMS 独立版
@@ -19,12 +19,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir={#Output}
-OutputBaseFilename=轻仓WMS安装包-V1.3.1-电脑版数量更新-Windows-x64
+OutputBaseFilename=轻仓WMS安装包-V1.3.2-Windows-x64
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
-DisableDirPage=auto
+DisableDirPage=no
 UsePreviousAppDir=yes
 UninstallDisplayIcon={app}\轻仓WMS.exe
 SetupIconFile=assets\wms.ico
