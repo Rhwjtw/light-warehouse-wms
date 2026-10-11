@@ -37,7 +37,7 @@ def main():
     for name in ('src/components/AccountBar.vue', 'src/views/Catalog.vue'):
         target = frontend/name
         target.write_bytes(target.read_bytes().replace(b'\r\n', b'\n'))
-    patch = (Path(__file__).parent/'profiles'/profile['packaging_patch']).read_bytes()
+    patch = (Path(__file__).parent/'profiles'/profile['packaging_patch']).read_bytes().replace(b'\r\n', b'\n')
     if hashlib.sha256(patch).hexdigest() != profile['packaging_patch_sha256']:
         raise RuntimeError('Packaging patch SHA mismatch')
     subprocess.run(GIT+['-c','core.autocrlf=false','apply','--whitespace=nowarn','--directory='+root.relative_to(APP.parent).as_posix(),'-'],input=patch,check=True)

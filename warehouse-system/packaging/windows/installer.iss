@@ -12,7 +12,7 @@ AppId={{924D0ED8-98CF-4BBF-B1F2-EE1E1D695B72}
 AppName=轻仓 WMS 独立版
 AppVersion=1.3.2
 AppPublisher=宋子豪
-DefaultDirName={localappdata}\LightWarehouseWMS
+DefaultDirName={sd}\LightWarehouseWMS
 DefaultGroupName=轻仓 WMS 独立版
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
@@ -71,8 +71,15 @@ var Code, I: Integer;
     Entry: TFindRec;
     HasFiles: Boolean;
     Lines: TArrayOfString;
+    InstallPath: String;
 begin
   Result := '';
+  InstallPath := ExpandConstant('{app}');
+  for I := 1 to Length(InstallPath) do
+    if Ord(InstallPath[I]) > 127 then begin
+      Result := '自带数据库需要英文安装路径。请点“上一步”选择英文目录，例如 D:\LightWarehouseWMS；支持自选磁盘和含空格的英文路径。已有数据保持，请勿搬动或删除data。';
+      Exit;
+    end;
   UpgradeMode := FileExists(ExpandConstant('{app}\data\config.json')) or DirExists(ExpandConstant('{app}\data\mysql'));
   if UpgradeMode and UpgradeCompleted then Exit;
   if not UpgradeMode then begin

@@ -115,7 +115,11 @@ def main():
     def summaries(root):
         return [json.loads(x.read_text(encoding='utf-8')) for x in (root/'data/upgrade-backups').glob('*/report.json')]
     # Fresh full installer: 3172 file hashes, initialization, inventory, BOM and restore.
-    fresh=out/'自选路径 新安装'
+    chinese=out/'中文目录 拒绝验收'
+    install(installer,chinese,'chinese-path-refused',expected=7)
+    assert not chinese.exists() and registered() is None
+    report['checks'].append('Chinese install path rejected before writing files to prevent MySQL path startup failure')
+    fresh=out/'Custom Install Path'
     shortcut=Path(os.environ['USERPROFILE'])/'Desktop/轻仓 WMS 独立版.lnk'
     assert not shortcut.exists(),'Preserve an existing desktop shortcut'
     install(installer,fresh,'fresh-install',desktop=True)
