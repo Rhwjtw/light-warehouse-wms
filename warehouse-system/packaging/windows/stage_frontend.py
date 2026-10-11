@@ -34,10 +34,13 @@ def main():
             if not target.is_relative_to(frontend) or name not in profile['files']:
                 raise RuntimeError('Unexpected overlay path')
             target.write_bytes(subprocess.check_output(GIT+['show', overlay['commit']+':warehouse-system/frontend/'+name]))
+    for name in ('src/components/AccountBar.vue', 'src/views/Catalog.vue'):
+        target = frontend/name
+        target.write_bytes(target.read_bytes().replace(b'\r\n', b'\n'))
     patch = (Path(__file__).parent/'profiles'/profile['packaging_patch']).read_bytes()
     if hashlib.sha256(patch).hexdigest() != profile['packaging_patch_sha256']:
         raise RuntimeError('Packaging patch SHA mismatch')
-    subprocess.run(GIT+['apply','--whitespace=nowarn','--directory='+root.relative_to(APP.parent).as_posix(),'-'],input=patch,check=True)
+    subprocess.run(GIT+['-c','core.autocrlf=false','apply','--whitespace=nowarn','--directory='+root.relative_to(APP.parent).as_posix(),'-'],input=patch,check=True)
     actual={f.relative_to(frontend).as_posix():hashlib.sha256(f.read_bytes()).hexdigest() for f in frontend.rglob('*') if f.is_file()}
     if actual != profile['files']: raise RuntimeError('Approved desktop source SHA mismatch')
     if (frontend/'src/mobile').exists() or re.search(r'''["']/m(?:/|["'])''', (frontend/'src/router.js').read_text(encoding='utf-8')):

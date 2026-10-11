@@ -75,5 +75,5 @@
     }
   ],
   "packaging_patch": "standalone-passwords.patch",
-  "packaging_patch_sha256": "d48c4bdfd79b1a81fd95eb5d88dd637b8fd04a0f2a990f6998c3a265d00229f6"
+  "packaging_patch_sha256": "c0cd34f139955cbfe90969b667944dfc674ff9fcc3269a70e5c7a978f43a2383"
 }
