@@ -249,7 +249,7 @@ def main():
                 cursor.execute('SELECT remaining_quantity FROM warehouse_standalone.finished_batches'); assert cursor.fetchone()[0] == Decimal('5.123456')
                 cursor.execute('SELECT COUNT(*) FROM warehouse_standalone.inventory_transactions'); assert cursor.fetchone()[0] == 3
                 cursor.execute('SELECT COUNT(*) FROM warehouse_standalone.stock_documents'); assert cursor.fetchone()[0] == 3
-                cursor.execute('SELECT COUNT(*) FROM warehouse_standalone.users'); assert cursor.fetchone()[0] == 1
+                cursor.execute('SELECT COUNT(*) FROM warehouse_standalone.users'); assert cursor.fetchone()[0] == (2 if manifest['version']=='1.3.2' else 1)
                 cursor.execute('SELECT status, deleted_at FROM warehouse_standalone.bom_headers WHERE id=%s', (unused['id'],))
                 restored_status, restored_deleted = cursor.fetchone()
                 assert restored_status == 'archived' and restored_deleted is not None
@@ -258,7 +258,7 @@ def main():
                 assert cursor.fetchone()[0] == 'cancelled'
                 cursor.execute("SELECT COUNT(*) FROM warehouse_standalone.operation_logs WHERE action='delete_bom'")
                 assert cursor.fetchone()[0] == 1
-            report['checks'].append(f'SQL backup checksum and actual restore into another empty MySQL instance: {expected_revision}, 3 documents, 3 ledger entries, 5.123456 boxes, 1 admin')
+            report['checks'].append(f'SQL backup checksum and actual restore into another empty MySQL instance: {expected_revision}, 3 documents, 3 ledger entries, 5.123456 boxes, all original and password-test accounts')
             report['checks'].append('backup restore preserves soft-deleted BOM/items/audit and protected cancelled production order')
         finally:
             if connection is not None:
