@@ -4,7 +4,7 @@ export const SYSTEM_INFO = Object.freeze({
   nameEn: 'Warehouse Management System',
   shortName: 'WMS',
   version: 'V1.3',
-  developer: '宋子豪',
+  developer: '千岁大魔王',
   year: '2026',
   architecture: 'Vue 3 + Vite + Element Plus + FastAPI + MySQL',
   type: '仓储与生产管理系统',

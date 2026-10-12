@@ -8,7 +8,7 @@
 AppId={{41B13E65-4491-4A32-9754-772C236346B4}
 AppName=轻仓 WMS V1.3 保留数据升级
 AppVersion=1.3.0
-AppPublisher=宋子豪
+AppPublisher=千岁大魔王
 DefaultDirName={localappdata}\LightWarehouseWMS
 UsePreviousAppDir=no
 DisableDirPage=no

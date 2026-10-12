@@ -11,7 +11,7 @@
 AppId={{924D0ED8-98CF-4BBF-B1F2-EE1E1D695B72}
 AppName=轻仓 WMS 独立版
 AppVersion=1.3.2
-AppPublisher=宋子豪
+AppPublisher=千岁大魔王
 DefaultDirName={sd}\LightWarehouseWMS
 DefaultGroupName=轻仓 WMS 独立版
 PrivilegesRequired=lowest
