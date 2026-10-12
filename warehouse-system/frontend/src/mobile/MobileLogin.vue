@@ -5,6 +5,7 @@ import { login } from '../auth'
 import { SYSTEM_INFO } from '../config/system'
 import { mobileLoginTarget } from './routes'
 import './mobile.css'
+import './mobile-refresh.css'
 const route = useRoute(), router = useRouter()
 const form = reactive({ username: '', password: '' }), loading = ref(false), error = ref('')
 async function submit() {
@@ -24,7 +25,7 @@ async function submit() {
   <main class="mobile-root mobile-login">
     <section class="mobile-card" aria-labelledby="mobile-login-title">
       <div class="mobile-login-brand"><span class="mobile-brand" aria-hidden="true">仓</span><strong>{{ SYSTEM_INFO.shortName }}</strong><span class="mobile-pill">手机版</span></div>
-      <h1 id="mobile-login-title">欢迎登录</h1><p class="mobile-muted">使用现有 WMS 账号，进入手机工作台。</p>
+      <h1 id="mobile-login-title">欢迎登录</h1><p class="mobile-muted">登录后开始今天的仓库作业。</p>
       <p v-if="route.query.status === 'password-changed'" class="mobile-success" role="status">密码已修改，请使用新密码重新登录。</p>
       <form class="mobile-form" @submit.prevent="submit">
         <label>用户名<input v-model="form.username" name="username" autocomplete="username" autocapitalize="none" :spellcheck="false" maxlength="64" :disabled="loading" placeholder="请输入用户名" /></label>

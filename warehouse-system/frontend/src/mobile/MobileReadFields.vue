@@ -14,5 +14,8 @@ function display(key, value) {
   return value
 }
 const fields = computed(() => Object.entries(labels).filter(([key]) => props.record[key] !== null && props.record[key] !== undefined && props.record[key] !== '').map(([key, label]) => ({ key, label: key === 'received_quantity' && props.record.receipt_movement_id ? '本笔入库' : label, value: display(key, props.record[key]) })))
+const identity = key => key === 'id' || key.endsWith('_id')
+const businessFields = computed(() => fields.value.filter(field => !identity(field.key)))
+const identityFields = computed(() => fields.value.filter(field => identity(field.key)))
 </script>
-<template><dl class="mobile-details mobile-read-fields"><div v-for="field in fields" :key="field.key"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl></template>
+<template><dl class="mobile-details mobile-read-fields"><div v-for="field in businessFields" :key="field.key"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl><details v-if="identityFields.length" class="mobile-more"><summary>记录标识</summary><dl class="mobile-details"><div v-for="field in identityFields" :key="field.key"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl></details></template>

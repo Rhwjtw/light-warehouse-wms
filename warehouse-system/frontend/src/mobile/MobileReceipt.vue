@@ -1,4 +1,6 @@
 <script setup>
+import MobileChoices from './MobileChoices.vue'
+import MobileTaskHeading from './MobileTaskHeading.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
@@ -165,38 +167,37 @@ onBeforeUnmount(() => { disposed = true; gate.cancel(); choiceGate.cancel(); win
 </script>
 
 <template>
-  <section class="mobile-card"><span class="mobile-pill">原料入库 · 入库后待上架</span><p v-if="task">状态：{{ taskLabels[task.status] }}</p><p v-if="!allowed" class="mobile-warning">当前角色可查询，无原料入库权限。</p><p v-if="warning" class="mobile-error" role="alert">{{ warning }}</p><p v-if="error" class="mobile-error" role="alert">{{ error }}</p><p v-if="checking" role="status">正在重新核实记录与权限…</p></section>
-  <section v-if="step === 'start'" class="mobile-card"><h2>原料入库</h2><router-link to="/m/jobs/finished-receipt" class="mobile-button">办理成品普通入库</router-link><p>填写原料、供应商、批号、日期和数量，核对后记入待上架。</p><button class="mobile-button primary" :disabled="!allowed || Boolean(warning)" @click="start">开始原料入库 / 恢复草稿</button><router-link v-for="draft in drafts" :key="draft.id" :to="receiptTaskPath(draft, lockedTask(draft) ? 'result' : 'form')" class="mobile-button">恢复{{ taskLabels[draft.status] }} · {{ draft.snapshot?.batchNo || draft.fields.batchNo || '未填批号' }}</router-link></section>
-  <section v-else-if="!task" class="mobile-card"><p>作业上下文不存在，可能已清理或属于其他账号。不能重建原请求。</p><router-link to="/m/jobs/receipt" class="mobile-button">返回原料入库入口</router-link></section>
-  <section v-else-if="locked" class="mobile-card">
-    <h2>{{ task.status === 'succeeded' ? '原料入库成功' : taskLabels[task.status] }}</h2><p>{{ task.reason }}</p>
-    <dl class="mobile-details"><div><dt>本次批号</dt><dd>{{ task.snapshot.batchNo }}</dd></div><div><dt>本次入库</dt><dd>{{ formatQuantity(task.snapshot.quantity) }} {{ task.snapshot.unit }}</dd></div><div><dt>原料 / 供应商ID</dt><dd>{{ task.snapshot.materialId }} / {{ task.snapshot.supplierId }}</dd></div><div><dt>生产 / 到期日期</dt><dd>{{ task.snapshot.productionDate }} / {{ task.snapshot.expiryDate }}</dd></div><div><dt>请求时间</dt><dd>{{ task.submittedAt }}</dd></div><div><dt>备注</dt><dd>{{ task.snapshot.notes || '—' }}</dd></div></dl>
-    <template v-if="task.status === 'succeeded'">
-      <p class="mobile-success">本笔已成功，旧表单不可再次提交。</p><p>单据：{{ task.result.documentNo }}（ID {{ task.result.id }}）</p>
-      <p v-if="!detail" class="mobile-warning">本笔记录与入库明细待读取；请刷新核对。</p>
-      <dl v-if="detail" class="mobile-details"><div><dt>原料 / 供应商</dt><dd>{{ detail.material_name }} / {{ detail.supplier_name }}</dd></div><div><dt>本笔明细ID</dt><dd>{{ detail.receipt_movement_id }}</dd></div><div><dt>本笔已上架量</dt><dd>{{ formatQuantity(detail.shelved_quantity) }} {{ detail.unit }}</dd></div><div><dt>本笔待上架量（实查）</dt><dd>{{ formatQuantity(detail.pending_quantity) }} {{ detail.unit }}</dd></div><div><dt>当前状态</dt><dd>{{ detail.status === 'reversed' ? '本笔已冲销' : detail.status === 'shelved' ? '已全部上架' : '待上架' }}</dd></div></dl>
-      <p v-if="stock">该原料已上架库存汇总（实查）：{{ formatQuantity(stock.remaining_quantity) }} {{ stock.unit }}。本笔待上架量不计入此汇总。</p><p v-else class="mobile-warning">相关库存待刷新，不能用旧量代替。</p><p v-if="refreshed" class="mobile-muted">读取时间：{{ refreshed }}</p>
-      <button class="mobile-button" :disabled="checking" @click="refreshResult">重新读取本笔记录与库存</button>
-      <router-link :to="{ path: `/m/read/receipt/${task.result.id}`, query: { from: receiptOrigin(task.origin) } }" class="mobile-button">查看本笔入库详情</router-link>
-      <router-link v-if="allowed && detail && !['reversed', 'shelved'].includes(detail.status)" :to="{ path: '/m/jobs/putaway', query: { receipt_id: String(task.result.id), movement_id: String(task.result.movementId), from: receiptOrigin(task.origin) } }" class="mobile-button primary">去上架本次入库（具体明细）</router-link>
-      <button class="mobile-button primary" :disabled="!allowed || Boolean(warning)" @click="start">继续入库（新作业）</button>
-    </template>
-    <template v-else><p class="mobile-warning">结果待核实。原请求内容及请求键保留；查询为空或相似记录都不能确定结果，不自动补记，也不能重新提交。</p><router-link to="/m/records?view=receipts" class="mobile-button">查询入库记录（仅辅助核对）</router-link></template>
-    <router-link :to="receiptOrigin(task.origin)" class="mobile-button">返回原列表</router-link>
-  </section>
-  <section v-else-if="step === 'choose'" class="mobile-card">
-    <h2>选择{{ choice === 'material' ? '原料' : '供应商' }}</h2><form class="mobile-search" @submit.prevent="choicePage(1)"><input v-model="search" :aria-label="choice === 'material' ? '搜索原料名称或编码' : '搜索供应商名称或编码'" maxlength="120" /><button class="mobile-button primary">搜索</button></form><p v-if="loading" class="mobile-status" role="status">正在查询…</p><p v-if="choiceError" class="mobile-error" role="alert">{{ choiceError }}</p><button v-if="choiceError" class="mobile-button" @click="loadChoices">重试查询</button>
-    <div v-if="!loading && !choiceError" data-mobile-list-ready><article v-for="row in items" :id="`s4a-${choice}-${row.id}`" :key="row.id" data-mobile-anchor class="mobile-card"><h3>{{ row.name }}</h3><p>{{ row.code }} <span v-if="row.unit">· {{ row.unit }}</span></p><button class="mobile-button" :disabled="busy" @click="select(row)">选择{{ row.name }}</button></article><p v-if="!items.length">没有匹配的可用档案。</p><p>共 {{ total }} 条 · 第 {{ page }} / {{ pages }} 页</p><div class="mobile-pagination"><button class="mobile-button" :disabled="page <= 1 || busy" @click="choicePage(page - 1)">上一页</button><button class="mobile-button" :disabled="page >= pages || busy" @click="choicePage(page + 1)">下一页</button></div></div>
-    <router-link :to="receiptTaskPath(task)" class="mobile-button">取消选择，返回表单</router-link>
-  </section>
-  <section v-else-if="step === 'confirm'" class="mobile-card"><h2>核对原料入库</h2><dl class="mobile-details"><div><dt>原料</dt><dd>{{ material?.name || form.materialId }}（{{ material?.code }}）</dd></div><div><dt>供应商</dt><dd>{{ supplier?.name || form.supplierId }}</dd></div><div><dt>批号</dt><dd>{{ form.batchNo }}</dd></div><div><dt>入库数量</dt><dd>{{ formatQuantity(form.quantity) }} {{ form.unit }}</dd></div><div><dt>生产 / 到期日期</dt><dd>{{ form.productionDate }} / {{ form.expiryDate }}</dd></div><div><dt>备注</dt><dd>{{ form.notes || '—' }}</dd></div></dl><p>本笔将记入待上架，尚不计入可用库位库存；日期、档案及事务由原后台最终校验。</p><button class="mobile-button primary" :disabled="busy || checking || !allowed || Boolean(warning)" @click="submit">确认提交原料入库</button><router-link :to="receiptTaskPath(task)" class="mobile-button">返回修改</router-link></section>
-  <section v-else class="mobile-card"><p v-if="task.status === 'rejected'" class="mobile-error">明确拒绝：{{ task.reason }}。可返回修改，相同内容保留原请求键。</p><form class="mobile-form" @submit.prevent="confirm"><fieldset :disabled="busy" class="mobile-receipt-fields"><div class="mobile-choice-field">原料<button type="button" class="mobile-button" @click="choose('material')">{{ material?.name || (form.materialId ? `原料ID ${form.materialId}` : '手动查询原料') }}</button></div><div class="mobile-choice-field">供应商<button type="button" class="mobile-button" @click="choose('supplier')">{{ supplier?.name || (form.supplierId ? `供应商ID ${form.supplierId}` : '手动查询供应商') }}</button></div><label>批号<input v-model="form.batchNo" maxlength="80" autocomplete="off" /></label><label>入库数量 · {{ form.unit || '先选择原料' }}<input v-model="form.quantity" inputmode="decimal" maxlength="80" autocomplete="off" /></label><p class="mobile-muted mobile-small">最多六位小数；不自动舍入。单位取所选原料档案。</p><label>生产日期<input v-model="form.productionDate" type="date" /></label><label>到期日期<input v-model="form.expiryDate" type="date" /></label><details><summary>备注（选填）</summary><label>备注<textarea v-model="form.notes" maxlength="2000" rows="3"></textarea></label></details><button class="mobile-button primary" :disabled="busy || checking || !allowed || Boolean(warning)">下一步：核对入库</button></fieldset></form><p class="mobile-muted mobile-small">编辑时保存草稿；恢复后重新读取权限与档案，不会自动提交。</p></section>
-</template>
 
+  <MobileTaskHeading title="原料入库" :task="task" :step="step" :allowed="allowed" :warning="warning" :error="error" :checking="checking" />
+  <template v-if="step === 'start'">
+    <div class="mobile-page-intro"><h2>开始原料入库</h2><p class="mobile-muted">登记到货，核对后进入待上架。</p></div>
+    <button class="mobile-button primary" :disabled="!allowed || Boolean(warning)" @click="start">新建原料入库</button>
+    <h3 v-if="drafts.length" class="mobile-section-title">未完成作业</h3>
+    <router-link v-for="draft in drafts" :key="draft.id" :to="receiptTaskPath(draft, lockedTask(draft) ? 'result' : 'form')" class="mobile-menu-item"><span><strong>{{ taskLabels[draft.status] }}</strong><small>{{ draft.snapshot?.batchNo || draft.fields.batchNo || '未填批号' }}</small></span></router-link>
+  </template>
+  <section v-else-if="!task" class="mobile-card"><h2>这笔作业无法恢复</h2><p class="mobile-muted">可能已清理，或属于其他账号。不能重建原请求。</p><router-link to="/m/jobs/receipt" class="mobile-button primary">返回原料入库入口</router-link></section>
+  <template v-else-if="locked">
+    <section class="mobile-card"><p class="mobile-big-number">{{ formatQuantity(task.snapshot.quantity) }} {{ task.snapshot.unit }}</p><dl class="mobile-details"><div v-if="task.result?.documentNo"><dt>单据号</dt><dd>{{ task.result.documentNo }}</dd></div><div><dt>批号</dt><dd>{{ task.snapshot.batchNo }}</dd></div><div v-if="detail"><dt>原料</dt><dd>{{ detail.material_name }}</dd></div><div v-if="detail"><dt>供应商</dt><dd>{{ detail.supplier_name }}</dd></div><div v-if="detail"><dt>本笔已上架</dt><dd>{{ formatQuantity(detail.shelved_quantity) }} {{ detail.unit }}</dd></div><div v-if="detail"><dt>本笔待上架</dt><dd>{{ formatQuantity(detail.pending_quantity) }} {{ detail.unit }}</dd></div></dl><details><summary>本笔请求信息</summary><p class="mobile-small">请求标识 {{ task.requestId }}</p><dl class="mobile-details"><div><dt>原料 / 供应商 ID</dt><dd>{{ task.snapshot.materialId }} / {{ task.snapshot.supplierId }}</dd></div><div><dt>提交时间</dt><dd>{{ task.submittedAt }}</dd></div><div><dt>生产 / 到期</dt><dd>{{ task.snapshot.productionDate }} / {{ task.snapshot.expiryDate }}</dd></div><div><dt>备注</dt><dd>{{ task.snapshot.notes || '—' }}</dd></div></dl></details></section>
+    <template v-if="task.status === 'succeeded'">
+      <p v-if="!detail || !stock" class="mobile-warning">本笔已成功，记录或库存待刷新，不能重复提交。</p>
+      <p v-if="stock" class="mobile-muted mobile-small">已上架汇总 {{ formatQuantity(stock.remaining_quantity) }} {{ stock.unit }}；本笔待上架量不计入此汇总。{{ refreshed ? '读取时间 ' + refreshed : '' }}</p>
+      <router-link v-if="allowed && detail && !['reversed', 'shelved'].includes(detail.status)" :to="{ path: '/m/jobs/putaway', query: { receipt_id: String(task.result.id), movement_id: String(task.result.movementId), from: receiptOrigin(task.origin) } }" class="mobile-button primary">去上架本次入库</router-link>
+      <button class="mobile-button" :disabled="checking" @click="refreshResult">刷新本笔记录与库存</button>
+      <button class="mobile-button" :disabled="!allowed || Boolean(warning)" @click="start">继续原料入库</button>
+      <router-link :to="{ path: '/m/read/receipt/' + task.result.id, query: { from: receiptOrigin(task.origin) } }" class="mobile-button">查看本笔入库详情</router-link>
+    </template>
+    <template v-else><p class="mobile-warning">{{ task.reason }}。原请求已保留，不能重交。查询为空或相似记录都不能确定结果。</p><router-link to="/m/records?view=receipts" class="mobile-button">查询入库记录（辅助核对）</router-link></template>
+    <router-link :to="receiptOrigin(task.origin)" class="mobile-button">返回原列表</router-link>
+  </template>
+  <MobileChoices v-else-if="step === 'choose'" :title="choice === 'material' ? '选择原料' : '选择供应商'" v-model:search="search" placeholder="名称 / 编码" :items="items" :total="total" :page="page" :pages="pages" :loading="loading" :error="choiceError" :busy="busy" :prefix="'s4a-' + choice + '-'" @search="choicePage(1)" @page="choicePage" @select="select" @cancel="returnToParent(router, receiptTaskPath(task))"><template #default="{ row }"><h3>{{ row.name }}</h3><p>{{ row.code }} <span v-if="row.unit">· {{ row.unit }}</span></p></template></MobileChoices>
+  <section v-else-if="step === 'confirm'" class="mobile-card"><p class="mobile-muted mobile-small">本次原料入库</p><p class="mobile-big-number">{{ formatQuantity(form.quantity) }} {{ form.unit }}</p><dl class="mobile-details"><div><dt>原料</dt><dd>{{ material?.name || form.materialId }} · {{ material?.code }}</dd></div><div><dt>供应商</dt><dd>{{ supplier?.name || form.supplierId }}</dd></div><div><dt>批号</dt><dd>{{ form.batchNo }}</dd></div><div><dt>生产日期</dt><dd>{{ form.productionDate }}</dd></div><div><dt>到期日期</dt><dd>{{ form.expiryDate }}</dd></div><div><dt>备注</dt><dd>{{ form.notes || '—' }}</dd></div></dl><p class="mobile-advisory">本笔记入待上架，暂不计入可用库存。</p><button class="mobile-button primary" :disabled="busy || checking || !allowed || Boolean(warning)" @click="submit">确认提交原料入库</button><router-link :to="receiptTaskPath(task)" class="mobile-button">返回修改</router-link></section>
+  <section v-else class="mobile-card"><p v-if="task.status === 'rejected'" class="mobile-error">本次提交未通过：{{ task.reason }}。可返回修改。</p><form class="mobile-form" @submit.prevent="confirm"><fieldset :disabled="busy" class="mobile-receipt-fields"><label>原料<button type="button" class="mobile-pick" @click="choose('material')"><span>{{ material?.name || (form.materialId ? '正在核对原料…' : '选择原料') }}<small v-if="material">{{ material.code }} · {{ form.unit }}</small></span><span aria-hidden="true">›</span></button></label><label>供应商<button type="button" class="mobile-pick" @click="choose('supplier')"><span>{{ supplier?.name || (form.supplierId ? '正在核对供应商…' : '选择供应商') }}</span><span aria-hidden="true">›</span></button></label><label>批号<input v-model="form.batchNo" placeholder="请输入批号" maxlength="80" autocomplete="off" /></label><label>入库数量 · {{ form.unit || '先选择原料' }}<input v-model="form.quantity" inputmode="decimal" placeholder="请输入数量" maxlength="80" autocomplete="off" /></label><div class="mobile-date-row"><label>生产日期<input v-model="form.productionDate" type="date" /></label><label>到期日期<input v-model="form.expiryDate" type="date" /></label></div><details><summary>备注（选填）</summary><label>备注<textarea v-model="form.notes" maxlength="2000" rows="3" /></label></details><p class="mobile-advisory">入库后待上架。数量最多六位小数，不自动舍入。</p><button class="mobile-button primary" :disabled="busy || checking || !allowed || Boolean(warning)">下一步：核对入库</button></fieldset></form></section>
+
+</template>
 <style scoped>
 .mobile-receipt-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; }
 .mobile-receipt-fields label, .mobile-choice-field { display: grid; gap: 8px; }
 summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
-.mobile-details div { display: grid; gap: 4px; }
-.mobile-details dt { width: auto; font-size: 14px; }
+
+
 </style>

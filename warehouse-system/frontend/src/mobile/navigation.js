@@ -23,7 +23,7 @@ export function mobileParentLocation(route, task) {
     return stockOrigin(task?.origin || route.query.from)
   }
   if (route.meta.mobilePutawayTask) {
-    if (['confirm', 'choose'].includes(route.params.step) && task && ['draft', 'rejected'].includes(task.status)) return putawayTaskPath(task)
+    if (['confirm', 'choose', 'scan'].includes(route.params.step) && task && ['draft', 'rejected'].includes(task.status)) return putawayTaskPath(task)
     return putawayOrigin(task?.origin || route.query.from)
   }
   if (route.meta.mobileReceiptTask) {

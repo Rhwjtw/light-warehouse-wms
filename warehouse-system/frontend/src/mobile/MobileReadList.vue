@@ -1,10 +1,15 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { Search } from '@element-plus/icons-vue'
+import { auth } from '../auth'
+import { canOperate } from '../permissions'
 import { api } from '../api'
 import { mobileStore } from './session'
 import { returnToParent } from './navigation'
 import { detailLocation, inventoryViews, recordViews, readCriteria, queryRequest, readGate, receiptStatuses, rowKey, rowTitle, quantityText, scopeLabel, safeReadOrigin, kindLabels } from './readQueries'
+const materialWrite = computed(() => canOperate(auth.user?.role, 'material.inventory.write'))
+const finishedWrite = computed(() => canOperate(auth.user?.role, 'finished.inventory.write'))
 const route = useRoute(), router = useRouter()
 const directoryViews = { directory: { label: '库位', endpoint: '/locations', search: '库位名称' } }
 const views = computed(() => route.path === '/m/records' ? recordViews : route.path === '/m/locations' ? directoryViews : route.path === '/m/pending' ? { receipts: recordViews.receipts } : inventoryViews)
@@ -70,18 +75,16 @@ onBeforeUnmount(() => { gate.cancel(); window.removeEventListener('wms-mobile-re
 
 <template>
   <section class="mobile-card">
-    <span class="mobile-pill">只读查询</span><h2>{{ route.path === '/m/pending' ? '具体入库记录' : config.label }}</h2>
-    <router-link v-if="route.path === '/m/pending' || (route.path === '/m/records' && criteria.view === 'receipts')" :to="{ path: '/m/jobs/receipt', query: { from: route.fullPath } }" class="mobile-button">办理原料入库</router-link>
-    <router-link v-if="route.path === '/m/inventory'" :to="{ path: criteria.view === 'finished' ? '/m/jobs/finished-outbound' : '/m/jobs/material-outbound', query: { from: route.fullPath } }" class="mobile-button">办理{{ criteria.view === 'finished' ? '成品' : '原料普通' }}出库（重新选择具体库存）</router-link><router-link v-if="route.path === '/m/records' && ['finishedReceipts', 'finishedOutbounds'].includes(criteria.view)" :to="{ path: criteria.view === 'finishedReceipts' ? '/m/jobs/finished-receipt' : '/m/jobs/finished-outbound', query: { from: route.fullPath } }" class="mobile-button">办理成品{{ criteria.view === 'finishedReceipts' ? '普通入库' : '出库' }}</router-link><p class="mobile-muted mobile-small">数量来自当前查询，单位分别显示。记录只能辅助人工核对，空列表或相似记录不能确定某次请求是否记账。</p>
-    <label v-if="Object.keys(views).length > 1" class="mobile-select-label">查询范围<select :value="criteria.view" aria-label="查询范围" @change="switchView($event.target.value)"><option v-for="(view, key) in views" :key="key" :value="key">{{ view.label }}</option></select></label>
-    <form v-if="config.search" class="mobile-form" @submit.prevent="apply"><label>{{ config.search }}<input v-model="search" type="search" :maxlength="criteria.view === 'locations' ? 80 : 120" /></label><button class="mobile-button primary" :disabled="loading">搜索</button></form>
+    <div class="mobile-section-heading"><h2>{{ route.path === '/m/pending' ? '待上架明细' : config.label }}</h2><button class="mobile-link-button" :disabled="loading" @click="refresh">刷新</button></div>
+    <div v-if="Object.keys(views).length > 1" :class="['mobile-view-tabs', { 'mobile-record-tabs': route.path === '/m/records' }]" aria-label="查询范围"><button v-for="(view, key) in views" :key="key" :class="{ active: criteria.view === key }" :aria-pressed="criteria.view === key" @click="switchView(key)">{{ view.label }}</button></div>
+    <form v-if="config.search" class="mobile-search" @submit.prevent="apply"><Search /><input v-model="search" type="search" :placeholder="config.search" :aria-label="config.search" :maxlength="criteria.view === 'locations' ? 80 : 120" /><button class="mobile-button" :disabled="loading">搜索</button></form>
     <button v-if="criteria.view === 'receipts'" class="mobile-button" @click="openFilter">状态：{{ receiptStatuses[activeCriteria.status] || '全部' }}</button>
     <div v-if="filtering && criteria.view === 'receipts'" role="dialog" aria-label="入库状态筛选" class="mobile-filter-panel"><label>入库状态<select v-model="status" aria-label="入库状态"><option v-if="route.path !== '/m/pending'" value="">全部</option><option v-for="(label, key) in receiptStatuses" :key="key" :value="key">{{ label }}</option></select></label><button class="mobile-button primary" @click="apply">应用筛选</button><button class="mobile-button" @click="closeFilter">取消筛选</button></div>
     <template v-if="criteria.view === 'locations'"><router-link :to="{ path: '/m/locations', query: { from: route.fullPath } }" class="mobile-button">按名称查找库位</router-link><p v-if="criteria.location_id" class="mobile-muted">库位：{{ location?.name || 'ID ' + criteria.location_id }} {{ location?.is_active === false ? '（已停用）' : '' }}</p><p v-if="locationError" class="mobile-error">库位信息读取失败：{{ locationError }}</p><button v-if="criteria.location_id" class="mobile-button" @click="change({ location_id: undefined, page: '1' })">清除库位筛选</button></template>
     <button v-if="criteria.material_id" class="mobile-button" @click="change({ material_id: undefined, page: '1' })">清除原料 ID {{ criteria.material_id }} 筛选</button>
     <p v-if="criteria.batch_id || criteria.product_id" class="mobile-muted mobile-small">关联{{ criteria.batch_id ? '原料批次 ID ' + criteria.batch_id : '成品 ID ' + criteria.product_id }}</p>
-    <router-link v-if="route.path === '/m/inventory'" to="/m/pending" class="mobile-button">查询待上架记录</router-link>
-    <button class="mobile-button" :disabled="loading" @click="refresh">刷新查询</button><p v-if="refreshed" class="mobile-muted mobile-small">读取时间 {{ refreshed }}</p>
+    <div class="mobile-row"><router-link v-if="route.path === '/m/inventory'" to="/m/pending" class="mobile-text-link">待上架记录</router-link><router-link v-if="materialWrite && (route.path === '/m/pending' || (route.path === '/m/records' && criteria.view === 'receipts'))" :to="{ path: '/m/jobs/receipt', query: { from: route.fullPath } }" class="mobile-text-link">新建原料入库</router-link><router-link v-if="route.path === '/m/inventory' && (criteria.view === 'finished' ? finishedWrite : materialWrite)" :to="{ path: criteria.view === 'finished' ? '/m/jobs/finished-outbound' : '/m/jobs/material-outbound', query: { from: route.fullPath } }" class="mobile-text-link">办理出库</router-link><router-link v-if="finishedWrite && route.path === '/m/records' && ['finishedReceipts', 'finishedOutbounds'].includes(criteria.view)" :to="{ path: criteria.view === 'finishedReceipts' ? '/m/jobs/finished-receipt' : '/m/jobs/finished-outbound', query: { from: route.fullPath } }" class="mobile-text-link">办理成品{{ criteria.view === 'finishedReceipts' ? '入库' : '出库' }}</router-link></div>
+    <p v-if="refreshed" class="mobile-muted mobile-small">读取时间 {{ refreshed }}</p>
   </section>
   <p v-if="loading" class="mobile-status" role="status">正在读取…</p><section v-else-if="error" class="mobile-card"><p class="mobile-error" role="alert">查询失败：{{ error }}</p><button class="mobile-button primary" @click="load(true)">重试查询</button></section>
   <template v-else>
@@ -90,11 +93,11 @@ onBeforeUnmount(() => { gate.cancel(); window.removeEventListener('wms-mobile-re
       <h2>{{ rowTitle(row) }}</h2><p class="mobile-muted">{{ row.material_code || row.product_code || row.code }} <span v-if="row.document_no"> · {{ row.document_no }}</span></p>
       <p v-if="config.quantity" class="mobile-quantity">{{ quantityText(row[config.quantity], row.unit) }}</p>
       <p v-if="row.stock_scope !== undefined">{{ scopeLabel(row.stock_scope, row.batch_no) }}</p><p v-else-if="row.batch_no">批号 {{ row.batch_no }}</p>
-      <p v-if="row.location_name">库位 {{ row.location_name }} · ID {{ row.location_id }}</p><p v-if="row.supplier_name">供应商 {{ row.supplier_name }}</p>
+      <p v-if="row.location_name">库位 {{ row.location_name }}</p><p v-if="row.supplier_name">供应商 {{ row.supplier_name }}</p>
       <p v-if="row.production_date || row.expiry_date" class="mobile-small">生产 {{ row.production_date || '—' }} / 到期 {{ row.expiry_date || '—' }}</p>
       <p v-if="row.expired" class="mobile-warning">已过期；查询可见不代表可正常出库</p><p v-if="row.is_active === false" class="mobile-warning">档案已停用</p>
       <p v-if="row.receipt_movement_id">入库单 ID {{ row.id }} · 明细 ID {{ row.receipt_movement_id }}</p><p v-if="row.pending_quantity !== undefined">待上架 {{ quantityText(row.pending_quantity, row.unit) }} · {{ receiptStatuses[row.status] }}</p>
-      <router-link v-if="criteria.view === 'receipts' && ['pending', 'partial'].includes(row.status)" :to="{ path: '/m/jobs/putaway', query: { receipt_id: String(row.id), movement_id: String(row.receipt_movement_id), from: route.fullPath } }" class="mobile-button">手动上架此明细</router-link><p v-if="row.kind">{{ kindLabels[row.kind] || row.kind }} <span v-if="row.reversed_by_document_id">· 已冲销</span></p>
+      <router-link v-if="materialWrite && criteria.view === 'receipts' && ['pending', 'partial'].includes(row.status)" :to="{ path: '/m/jobs/putaway', query: { receipt_id: String(row.id), movement_id: String(row.receipt_movement_id), from: route.fullPath } }" class="mobile-button">上架此明细</router-link><p v-if="row.kind">{{ kindLabels[row.kind] || row.kind }} <span v-if="row.reversed_by_document_id">· 已冲销</span></p>
       <p v-if="row.material_outbound_purpose">用途 {{ { normal: '普通出库', supplier_return: '供应商退货', scrap: '报废' }[row.material_outbound_purpose] }}</p>
       <p v-if="row.source_location_name || row.target_location_name">{{ row.source_location_name || '无来源库位' }} → {{ row.target_location_name || '无目标库位' }}</p>
       <p v-if="row.before_quantity !== undefined" class="mobile-small">变动前 {{ quantityText(row.before_quantity, row.unit) }} → 变动后 {{ quantityText(row.after_quantity, row.unit) }}</p>

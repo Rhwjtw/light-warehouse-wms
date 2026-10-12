@@ -1,4 +1,6 @@
 <script setup>
+import MobileChoices from './MobileChoices.vue'
+import MobileTaskHeading from './MobileTaskHeading.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
@@ -10,6 +12,8 @@ import { lockedTask, taskLabels } from './taskState'
 import { readGate, positiveId } from './readQueries'
 import { returnToParent } from './navigation'
 import { putawayFields, putawayKind, putawayOrigin, putawayPayload, putawaySnapshot, putawayTaskPath, verifyPutawayReceipt, readPutawayResult } from './putaway'
+import { qrInstance, readQrObject } from './qr.js'
+import MobileScanner from './MobileScanner.vue'
 const route = useRoute(), router = useRouter(), form = reactive(putawayFields())
 const error = ref(''), busy = ref(false), checking = ref(false), receipt = ref(null), location = ref(null), result = ref(null), refreshed = ref('')
 const gate = readGate(), choiceGate = readGate(), items = ref([]), total = ref(0), loading = ref(false), search = ref(''), choiceError = ref('')
@@ -22,6 +26,8 @@ const step = computed(() => route.params.step || 'start'), choice = computed(() 
 const page = computed(() => /^[1-9]\d*$/.test(route.query.page) && Number.isSafeInteger(Number(route.query.page)) ? Number(route.query.page) : 1)
 const pages = computed(() => Math.max(1, Math.ceil(total.value / 20)))
 const canContinue = computed(() => result.value && result.value.receipt.status !== 'reversed' && quantityUnits(result.value.receipt.pending_quantity) > 0n)
+const scanError = ref(''), scanner = ref(null)
+const qrConfig = computed(() => { try { return { instance: qrInstance(), error: '' } } catch (e) { return { instance: '', error: e.message } } })
 let restoring = false, disposed = false, editVersion = 0
 function loadFields() { restoring = true; Object.assign(form, putawayFields(task.value?.fields)); restoring = false }
 watch(form, () => { if (!restoring && task.value && !locked.value) { editVersion++; mobileStore().edit(task.value.id, form); touchMobile() } }, { flush: 'sync' })
@@ -57,7 +63,7 @@ async function check() {
     if (user.id !== auth.user?.id || store !== mobileStore()) throw new Error('账户已变化，请重新登录')
     auth.user = user
     const fields = original.snapshot && lockedTask(original) ? original.snapshot : original.fields
-    if (!fields.receiptId) throw new Error('请手动选择具体入库明细')
+    if (!fields.receiptId) throw new Error('请选择具体入库明细')
     const row = verifyPutawayReceipt(fields, (await api.get(`/material-receipts/${fields.receiptId}`)).data, !lockedTask(original))
     const [material, supplier, target] = await Promise.all([api.get(`/materials/${row.material_id}`), api.get(`/suppliers/${row.supplier_id}`), fields.locationId ? api.get(`/locations/${fields.locationId}`) : Promise.resolve(null)])
     if (!gate.current(ticket) || disposed || store !== mobileStore() || task.value?.id !== original.id || editVersion !== version) return false
@@ -115,6 +121,34 @@ async function refreshResult() {
   } catch (e) { if (gate.current(ticket)) error.value = `上架已成功，待刷新：${e.message}` }
   finally { if (gate.current(ticket)) checking.value = false }
 }
+function scan(kind) {
+  if (!task.value || locked.value || busy.value || !allowed.value || warning.value || !qrConfig.value.instance) return
+  scanError.value = ''
+  router.push({ path: putawayTaskPath(task.value, 'scan'), query: { kind } })
+}
+function cancelScan() { scanner.value?.stop(); returnToParent(router, putawayTaskPath(task.value)) }
+async function scanned(text) {
+  if (!task.value || locked.value || busy.value || step.value !== 'scan') return
+  scanner.value?.stop(); busy.value = true; scanError.value = ''
+  const original = task.value, kind = choice.value, store = mobileStore(), ticket = choiceGate.begin(), path = route.fullPath, version = editVersion, userId = auth.user?.id
+  try {
+    const me = (await api.get('/auth/me')).data
+    if (me.id !== userId || store !== mobileStore()) throw new Error('账户已变化，请重新登录')
+    auth.user = me
+    if (!allowed.value) throw new Error('当前角色无原料上架权限')
+    const current = await readQrObject(api, text, kind, qrConfig.value.instance)
+    if (disposed || !choiceGate.current(ticket) || route.fullPath !== path || task.value?.id !== original.id || store !== mobileStore() || auth.user?.id !== userId || locked.value || editVersion !== version) return
+    let selected = original
+    if (kind === 'location') {
+      form.locationId = String(current.id); location.value = current
+    } else {
+      if (original.fields.receiptId && (original.fields.receiptId !== String(current.id) || original.fields.movementId !== String(current.receipt_movement_id)) && !window.confirm('换为此入库明细会清空旧库位、数量和请求状态，确认更换？')) return
+      selected = store.selectPutaway(original.id, current); touchMobile()
+    }
+    returnToParent(router, putawayTaskPath(selected, lockedTask(selected) ? 'result' : 'form'))
+  } catch (e) { if (choiceGate.current(ticket) && route.fullPath === path) scanError.value = e.message }
+  finally { busy.value = false }
+}
 function choose(kind) { if (!locked.value && !busy.value) router.push({ path: putawayTaskPath(task.value, 'choose'), query: { kind } }) }
 function choicePage(value) { router.replace({ path: route.path, query: { kind: choice.value, q: search.value || undefined, page: String(value) } }) }
 async function loadChoices(restorePosition = true) {
@@ -158,13 +192,15 @@ async function select(row) {
   finally { busy.value = false }
 }
 function restore() {
-  gate.cancel(); choiceGate.cancel(); checking.value = false; error.value = ''; receipt.value = null; location.value = null; result.value = null
+  scanner.value?.stop(); scanError.value = ''; gate.cancel(); choiceGate.cancel(); checking.value = false; error.value = ''; receipt.value = null; location.value = null; result.value = null
   loadFields()
+  if (step.value === 'scan') return
   if (step.value === 'choose') loadChoices()
   else if (task.value?.status === 'succeeded') refreshResult()
   else if (task.value && form.receiptId) check()
 }
 function resume() {
+  if (step.value === 'scan') return
   if (step.value === 'choose') {
     if (document.querySelector('[data-mobile-list-ready]')) {
       const anchor = [...document.querySelectorAll('[data-mobile-anchor]')].find(el => el.getBoundingClientRect().bottom > 80)
@@ -176,37 +212,31 @@ function resume() {
 }
 watch(() => route.fullPath, restore)
 onMounted(() => { restore(); window.addEventListener('wms-mobile-resume', resume) })
-onBeforeUnmount(() => { disposed = true; gate.cancel(); choiceGate.cancel(); window.removeEventListener('wms-mobile-resume', resume) })
+onBeforeUnmount(() => { scanner.value?.stop(); disposed = true; gate.cancel(); choiceGate.cancel(); window.removeEventListener('wms-mobile-resume', resume) })
 </script>
 
 <template>
-  <section class="mobile-card"><span class="mobile-pill">原料手动上架</span><p v-if="task">状态：{{ taskLabels[task.status] }}</p><p v-if="!allowed" class="mobile-warning">当前角色可查询，无原料上架权限。</p><p v-if="warning" class="mobile-error" role="alert">{{ warning }}</p><p v-if="error" class="mobile-error" role="alert">{{ error }}</p><p v-if="checking" role="status">正在重新核实记录、库位与剩余量…</p></section>
-  <section v-if="step === 'start'" class="mobile-card"><h2>手动上架</h2><p>选择具体入库明细和库位，支持部分上架与同件多库位作业。</p><button class="mobile-button primary" :disabled="!allowed || Boolean(warning) || busy" @click="start(false)">开始手动上架 / 恢复草稿</button><router-link v-for="draft in drafts" :key="draft.id" :to="putawayTaskPath(draft, lockedTask(draft) ? 'result' : 'form')" class="mobile-button">恢复{{ taskLabels[draft.status] }} · 入库明细 {{ draft.snapshot?.movementId || draft.fields.movementId || '未选' }}</router-link></section>
-  <section v-else-if="!task" class="mobile-card"><p>作业上下文不存在，可能已清理或属于其他账号。不能重建原请求。</p><router-link to="/m/jobs/putaway" class="mobile-button">返回手动上架入口</router-link></section>
-  <section v-else-if="locked" class="mobile-card">
-    <h2>{{ task.status === 'succeeded' ? '原料上架成功' : taskLabels[task.status] }}</h2><p>{{ task.reason }}</p>
-    <dl class="mobile-details"><div><dt>入库单 / 明细ID</dt><dd>{{ task.snapshot.receiptId }} / {{ task.snapshot.movementId }}</dd></div><div><dt>目标库位ID</dt><dd>{{ task.snapshot.locationId }}</dd></div><div><dt>本次上架量</dt><dd>{{ formatQuantity(task.snapshot.quantity) }} {{ task.snapshot.unit }}</dd></div><div><dt>请求时间</dt><dd>{{ task.submittedAt }}</dd></div><div><dt>备注</dt><dd>{{ task.snapshot.notes || '—' }}</dd></div></dl>
-    <template v-if="task.status === 'succeeded'">
-      <p class="mobile-success">本笔已成功，旧表单不可再次提交。</p><p>上架单：{{ task.result.documentNo }}（ID {{ task.result.id }}）</p>
-      <p v-if="!result" class="mobile-warning">成功、待刷新。本笔记录、分配与库位库存待读取，不能用旧量继续。</p>
-      <template v-else><h3>{{ result.receipt.material_name }} · {{ result.receipt.batch_no }}</h3><p>本笔入库单：{{ result.receipt.document_no }} · 明细 {{ result.receipt.receipt_movement_id }}</p><p>本笔已上架量（实查）：{{ formatQuantity(result.receipt.shelved_quantity) }} {{ result.receipt.unit }}</p><p>本笔待上架量（实查）：{{ formatQuantity(result.receipt.pending_quantity) }} {{ result.receipt.unit }}</p><p>目标库位 {{ result.target.location_name }} · 库位批次余额（实查）：{{ formatQuantity(result.target.remaining_quantity) }} {{ result.target.unit }}</p><details><summary>本笔全部上架分配与相关库位库存</summary><p v-for="a in result.receipt.allocations" :key="a.id">上架单ID {{ a.document_id }} · {{ a.location_name }} · {{ formatQuantity(a.quantity) }} {{ result.receipt.unit }} {{ a.reversed_by_document_id ? '（已冲销）' : '' }}</p><p v-for="s in result.stocks" :key="s.id">库位 {{ s.location_name }} · 批次ID {{ s.id }} · {{ s.batch_no }} · {{ formatQuantity(s.remaining_quantity) }} {{ s.unit }}</p></details><p v-if="!canContinue" class="mobile-warning">本记录已全部上架或已冲销，不得同件继续。</p></template>
-      <p v-if="refreshed" class="mobile-muted">读取时间：{{ refreshed }}</p><button class="mobile-button" :disabled="checking" @click="refreshResult">重新读取本笔记录、分配与库存</button>
-      <router-link :to="{ path: `/m/read/document/${task.result.id}`, query: { from: putawayOrigin(task.origin) } }" class="mobile-button">查看本笔上架单</router-link><router-link :to="{ path: `/m/read/receipt/${task.snapshot.receiptId}`, query: { from: putawayOrigin(task.origin) } }" class="mobile-button">查看具体入库明细</router-link>
-      <button v-if="canContinue" class="mobile-button primary" :disabled="busy || checking || !allowed || Boolean(warning)" @click="start(true)">同一货物继续（重新读取剩余量）</button><button class="mobile-button primary" :disabled="busy || !allowed || Boolean(warning)" @click="start(false)">下一件（手动选择新作业）</button>
-    </template>
-    <template v-else><p class="mobile-warning">结果待核实。原请求键与内容保留；空列表或相似记录不能确定结果，不自动补记，不可重交。</p><router-link to="/m/records?view=putaways" class="mobile-button">查询上架记录（仅辅助核对）</router-link></template>
-    <router-link :to="putawayOrigin(task.origin)" class="mobile-button">返回原列表</router-link>
+
+  <MobileTaskHeading title="原料上架" :task="task" :step="step" :allowed="allowed" :warning="warning" :error="error" :checking="checking" />
+  <template v-if="step === 'start'"><div class="mobile-page-intro"><h2>开始原料上架</h2><p class="mobile-muted">选择具体入库明细，支持部分上架和多库位。</p></div><button class="mobile-button primary" :disabled="!allowed || Boolean(warning) || busy" @click="start(false)">新建原料上架</button><h3 v-if="drafts.length" class="mobile-section-title">未完成作业</h3><router-link v-for="draft in drafts" :key="draft.id" :to="putawayTaskPath(draft, lockedTask(draft) ? 'result' : 'form')" class="mobile-menu-item"><span><strong>{{ taskLabels[draft.status] }}</strong><small>入库明细 {{ draft.snapshot?.movementId || draft.fields.movementId || '尚未选择' }}</small></span></router-link></template>
+  <section v-else-if="!task" class="mobile-card"><h2>这笔作业无法恢复</h2><p class="mobile-muted">可能已清理，或属于其他账号。不能重建原请求。</p><router-link to="/m/jobs/putaway" class="mobile-button primary">返回上架入口</router-link></section>
+  <template v-else-if="locked"><section class="mobile-card"><p class="mobile-big-number">{{ formatQuantity(task.snapshot.quantity) }} {{ task.snapshot.unit }}</p><dl class="mobile-details"><div v-if="task.result?.documentNo"><dt>上架单号</dt><dd>{{ task.result.documentNo }}</dd></div><div v-if="result"><dt>原料 / 批号</dt><dd>{{ result.receipt.material_name }} / {{ result.receipt.batch_no }}</dd></div><div v-if="result"><dt>目标库位</dt><dd>{{ result.target.location_name }}</dd></div><div v-if="result"><dt>本笔待上架</dt><dd>{{ formatQuantity(result.receipt.pending_quantity) }} {{ result.receipt.unit }}</dd></div><div v-if="result"><dt>库位批次余额</dt><dd>{{ formatQuantity(result.target.remaining_quantity) }} {{ result.target.unit }}</dd></div></dl><details><summary>本笔明细与请求信息</summary><p class="mobile-small">请求标识 {{ task.requestId }}</p><p>入库单 {{ task.snapshot.receiptId }} · 明细 {{ task.snapshot.movementId }} · 库位 {{ task.snapshot.locationId }}</p><p>请求时间 {{ task.submittedAt }}</p><p>备注 {{ task.snapshot.notes || '—' }}</p></details></section>
+    <template v-if="task.status === 'succeeded'"><p v-if="!result" class="mobile-warning">本笔已成功，记录、分配和库存待刷新，不能用旧量继续。</p><p v-else-if="!canContinue" class="mobile-warning">本记录已全部上架或已冲销，不能同件继续。</p><button v-if="canContinue" class="mobile-button primary" :disabled="busy || checking || !allowed || Boolean(warning)" @click="start(true)">同一货物继续上架</button><button :class="['mobile-button', { primary: !canContinue }]" :disabled="busy || !allowed || Boolean(warning)" @click="start(false)">下一件上架</button><button class="mobile-button" :disabled="checking" @click="refreshResult">刷新本笔记录与库存</button><router-link :to="{ path: '/m/read/document/' + task.result.id, query: { from: putawayOrigin(task.origin) } }" class="mobile-button">查看本笔上架单</router-link><router-link :to="{ path: '/m/read/receipt/' + task.snapshot.receiptId, query: { from: putawayOrigin(task.origin) } }" class="mobile-button">查看具体入库明细</router-link><details v-if="result" class="mobile-card"><summary>全部上架分配与相关库存</summary><p v-for="a in result.receipt.allocations" :key="a.id">{{ a.location_name }} · {{ formatQuantity(a.quantity) }} {{ result.receipt.unit }} · 单据 {{ a.document_id }} {{ a.reversed_by_document_id ? '（已冲销）' : '' }}</p><p v-for="s in result.stocks" :key="s.id">{{ s.location_name }} · {{ s.batch_no }} · {{ formatQuantity(s.remaining_quantity) }} {{ s.unit }}</p><p class="mobile-small mobile-muted">读取时间 {{ refreshed }}</p></details></template>
+    <template v-else><p class="mobile-warning">{{ task.reason }}。原请求已保留，不能重交；空列表或相似记录不能确定结果。</p><router-link to="/m/records?view=putaways" class="mobile-button">查询上架记录（辅助核对）</router-link></template><router-link :to="putawayOrigin(task.origin)" class="mobile-button">返回原列表</router-link>
+  </template>
+  <MobileScanner v-else-if="step === 'scan' && qrConfig.instance" ref="scanner" :type="choice" :busy="busy" :error="scanError" @decoded="scanned" @cancel="cancelScan" />
+  <section v-else-if="step === 'scan'" class="mobile-card"><p class="mobile-warning">{{ qrConfig.error }}</p><button class="mobile-button" @click="cancelScan">返回原表单</button></section>
+  <MobileChoices :maxlength="choice === 'location' ? 80 : 120" v-else-if="step === 'choose'" :title="choice === 'location' ? '选择上架库位' : '选择待上架明细'" v-model:search="search" :placeholder="choice === 'location' ? '库位名称' : '原料 / 批号 / 入库单号'" :items="items" :total="total" :page="page" :pages="pages" :loading="loading" :error="choiceError" :busy="busy" :prefix="'s4b-' + choice + '-'" @search="choicePage(1)" @page="choicePage" @select="select" @cancel="returnToParent(router, putawayTaskPath(task))"><template #default="{ row }"><h3>{{ row.name || row.material_name }}</h3><template v-if="choice === 'receipt'"><p>{{ row.document_no }} · 明细 {{ row.receipt_movement_id }}</p><p>{{ row.batch_no }} · {{ row.supplier_name }}</p><p class="mobile-choice-quantity">待上架 {{ formatQuantity(row.pending_quantity) }} {{ row.unit }}</p><p>生产 {{ row.production_date }} / 到期 {{ row.expiry_date }}</p></template><p v-else>库位 {{ row.id }}</p></template></MobileChoices>
+  <section v-else class="mobile-card"><p v-if="task.status === 'rejected'" class="mobile-error">本次提交未通过：{{ task.reason }}。修改后重新核对。</p>
+    <template v-if="step === 'confirm'"><p class="mobile-muted mobile-small">本次原料上架</p><p class="mobile-big-number">{{ formatQuantity(form.quantity) }} {{ form.unit }}</p><dl class="mobile-details"><div><dt>原料 / 批号</dt><dd>{{ receipt?.material_name || '待读取' }} / {{ receipt?.batch_no }}</dd></div><div><dt>供应商</dt><dd>{{ receipt?.supplier_name }}</dd></div><div><dt>入库单 / 明细</dt><dd>{{ receipt?.document_no || form.receiptId }} / {{ form.movementId }}</dd></div><div><dt>目标库位</dt><dd>{{ location?.name || form.locationId }}</dd></div><div v-if="receipt"><dt>最新待上架</dt><dd>{{ formatQuantity(receipt.pending_quantity) }} {{ receipt.unit }}</dd></div><div><dt>备注</dt><dd>{{ form.notes || '—' }}</dd></div></dl><p class="mobile-advisory">提交前再次读取待上架量，后台最终校验。</p><button class="mobile-button primary" :disabled="busy || checking || !allowed || Boolean(warning)" @click="submit">确认提交原料上架</button><router-link :to="putawayTaskPath(task)" class="mobile-button">返回修改</router-link></template>
+    <form v-else class="mobile-form" @submit.prevent="confirm"><fieldset :disabled="busy" class="mobile-putaway-fields"><label>具体入库明细<button type="button" class="mobile-pick" @click="choose('receipt')"><span>{{ receipt?.material_name || '选择待上架明细' }}<small v-if="receipt">{{ receipt.document_no }} · 明细 {{ receipt.receipt_movement_id }} · {{ receipt.batch_no }}</small></span><span aria-hidden="true">›</span></button></label><button type="button" class="mobile-text-button" :disabled="!qrConfig.instance || !allowed || Boolean(warning)" @click="scan('receipt')">扫描货物标签</button><p v-if="receipt" class="mobile-advisory">最新待上架 {{ formatQuantity(receipt.pending_quantity) }} {{ receipt.unit }}</p><label>目标库位<button type="button" class="mobile-pick" @click="choose('location')"><span>{{ location?.name || '选择上架库位' }}</span><span aria-hidden="true">›</span></button></label><button type="button" class="mobile-text-button" :disabled="!qrConfig.instance || !allowed || Boolean(warning)" @click="scan('location')">扫描库位标签</button><p v-if="qrConfig.error" class="mobile-advisory">{{ qrConfig.error }}，可使用手动查询。</p><label>本次上架数量 · {{ form.unit || '先选择明细' }}<input v-model="form.quantity" inputmode="decimal" placeholder="请输入数量" maxlength="80" autocomplete="off" /></label><details><summary>备注（选填）</summary><label>备注<textarea v-model="form.notes" maxlength="2000" rows="3" /></label></details><p class="mobile-advisory">最多六位小数，不自动舍入；连续作业清空旧数量。</p><button class="mobile-button primary" :disabled="busy || checking || !allowed || Boolean(warning)">下一步：核对上架</button></fieldset></form>
   </section>
-  <section v-else-if="step === 'choose'" class="mobile-card"><h2>选择{{ choice === 'location' ? '库位' : '具体待上架明细' }}</h2><p v-if="choice === 'receipt'" class="mobile-warning">换另一明细会清空旧库位、数量和请求状态。</p><form class="mobile-search" @submit.prevent="choicePage(1)"><input v-model="search" :aria-label="choice === 'location' ? '搜索库位名称' : '搜索原料编码、名称、批号或入库单号'" :maxlength="choice === 'location' ? 80 : 120" /><button class="mobile-button primary">搜索</button></form><p v-if="loading" class="mobile-status" role="status">正在查询…</p><p v-if="choiceError" class="mobile-error" role="alert">{{ choiceError }}</p><button v-if="choiceError" class="mobile-button" @click="loadChoices">重试查询</button><div v-if="!loading && !choiceError" data-mobile-list-ready><article v-for="row in items" :id="`s4b-${choice}-${row.id}`" :key="row.id" data-mobile-anchor class="mobile-card"><h3>{{ row.name || row.material_name }}</h3><template v-if="choice === 'receipt'"><p>{{ row.document_no }} · 入库单ID {{ row.id }} · 明细ID {{ row.receipt_movement_id }}</p><p>{{ row.batch_no }} · {{ row.supplier_name }} · {{ row.production_date }} / {{ row.expiry_date }}</p><p>待上架 {{ formatQuantity(row.pending_quantity) }} {{ row.unit }}</p></template><p v-else>库位ID {{ row.id }}</p><button class="mobile-button" :disabled="busy" @click="select(row)">选择{{ row.name || row.document_no }}</button></article><p v-if="!items.length">没有匹配的可用记录。</p><p>共 {{ total }} 条 · 第 {{ page }} / {{ pages }} 页</p><div class="mobile-pagination"><button class="mobile-button" :disabled="page <= 1 || busy" @click="choicePage(page - 1)">上一页</button><button class="mobile-button" :disabled="page >= pages || busy" @click="choicePage(page + 1)">下一页</button></div></div><router-link :to="putawayTaskPath(task)" class="mobile-button">取消选择，返回表单</router-link></section>
-  <section v-else class="mobile-card"><p v-if="task.status === 'rejected'" class="mobile-error">明确拒绝：{{ task.reason }}。可修改后重新核对。</p><h2>{{ step === 'confirm' ? '核对原料上架' : '上架表单' }}</h2><dl v-if="receipt" class="mobile-details"><div><dt>原料 / 批号</dt><dd>{{ receipt.material_name }}（{{ receipt.material_code }}） / {{ receipt.batch_no }}</dd></div><div><dt>供应商 / 日期</dt><dd>{{ receipt.supplier_name }} / {{ receipt.production_date }}～{{ receipt.expiry_date }}</dd></div><div><dt>入库单 / 明细</dt><dd>{{ receipt.document_no }} / {{ receipt.receipt_movement_id }}</dd></div><div><dt>最新待上架量</dt><dd>{{ formatQuantity(receipt.pending_quantity) }} {{ receipt.unit }}</dd></div></dl>
-    <template v-if="step === 'confirm'"><p>库位：{{ location?.name || form.locationId }}</p><p>本次上架：{{ formatQuantity(form.quantity) }} {{ form.unit }}</p><p>备注：{{ form.notes || '—' }}</p><p>提交前再次读取；最终剩余量由原后台事务校验。</p><button class="mobile-button primary" :disabled="busy || checking || !allowed || Boolean(warning)" @click="submit">确认提交原料上架</button><router-link :to="putawayTaskPath(task)" class="mobile-button">返回修改</router-link></template>
-    <form v-else class="mobile-form" @submit.prevent="confirm"><fieldset :disabled="busy" class="mobile-putaway-fields"><div>具体入库明细<button type="button" class="mobile-button" @click="choose('receipt')">手动查询待上架明细</button></div><div>目标库位<button type="button" class="mobile-button" @click="choose('location')">{{ location?.name || (form.locationId ? `库位ID ${form.locationId}` : '手动查询库位') }}</button></div><label>本次上架数量 · {{ form.unit || '先选择明细' }}<input v-model="form.quantity" inputmode="decimal" maxlength="80" autocomplete="off" /></label><p class="mobile-muted mobile-small">最多六位小数，不自动舍入；连续作业清空旧数量。</p><details><summary>备注（选填）</summary><label>备注<textarea v-model="form.notes" maxlength="2000" rows="3"></textarea></label></details><button class="mobile-button primary" :disabled="busy || checking || !allowed || Boolean(warning)">下一步：核对上架</button></fieldset></form>
-  </section>
+
 </template>
 <style scoped>
 .mobile-putaway-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; }
 .mobile-putaway-fields label { display: grid; gap: 8px; }
 summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
-.mobile-details div { display: grid; gap: 4px; }
-.mobile-details dt { width: auto; font-size: 14px; }
+
+
 </style>

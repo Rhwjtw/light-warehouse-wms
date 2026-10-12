@@ -10,7 +10,7 @@ export const mobileNavigation = [
 
 export const mobileActions = [
   { key: 'inventory', path: '/m/inventory', label: '查库存', stage: 'S3', icon: 'Search' },
-  { key: 'receipt', path: '/m/jobs/receipt', label: '入库', stage: 'S4 / S5', icon: 'Download', permissions: ['material.inventory.write', 'finished.inventory.write'] },
+  { key: 'receipt', path: '/m/jobs/inbound', label: '入库', stage: 'S4 / S5', icon: 'Download', permissions: ['material.inventory.write', 'finished.inventory.write'] },
   { key: 'outbound', path: '/m/jobs/outbound', label: '出库', stage: 'S5', icon: 'Upload', permissions: ['material.inventory.write', 'finished.inventory.write'] },
   { key: 'putaway', path: '/m/jobs/putaway', label: '上架', stage: 'S4', icon: 'Box', permissions: ['material.inventory.write'] },
   { key: 'transfer', path: '/m/jobs/material-transfer', label: '移库', stage: 'S6', icon: 'Switch', permissions: ['material.inventory.write'] },
@@ -25,9 +25,9 @@ export function visibleMobileActions(role, canOperate) {
 export function mobileLoginTarget(value) {
   if (typeof value !== 'string' || value.includes('\\') || /[\u0000-\u001f]/.test(value)) return '/m'
   const path = value.split(/[?#]/)[0]
-  if (/^\/m\/jobs\/(receipt|putaway|material-outbound|finished-outbound|finished-receipt|material-transfer|material-count)\/[\w-]{1,80}\/(form|confirm|result|choose)$/.test(path)) return value
+  if (/^\/m\/jobs\/(receipt|putaway|material-outbound|finished-outbound|finished-receipt|material-transfer|material-count)\/[\w-]{1,80}\/(form|confirm|result|choose|scan)$/.test(path)) return value
   const paths = [...mobileNavigation.map(item => item.path), '/m/account/password', ...mobileActions.map(item => item.path), ...stockKinds.map(kind => `/m/jobs/${kind}`)]
-  return paths.includes(path) || ['/m/pending', '/m/locations', '/m/state-lab'].includes(path) || /^\/m\/read\/(batch|finished|receipt|document|count)\/[1-9]\d{0,9}$/.test(path) || /^\/m\/state-lab\/[\w-]{1,80}\/(form|confirm|result|context)$/.test(path) ? value : '/m'
+  return paths.includes(path) || ['/m/pending', '/m/locations', '/m/state-lab', '/m/labels', '/m/jobs/receipt'].includes(path) || /^\/m\/read\/(batch|finished|receipt|document|count)\/[1-9]\d{0,9}$/.test(path) || /^\/m\/state-lab\/[\w-]{1,80}\/(form|confirm|result|context)$/.test(path) ? value : '/m'
 }
 
 export function loginLocation(route) {
@@ -44,6 +44,7 @@ export const mobileRoutes = [
       { path: 'inventory', component: () => import('./MobileReadList.vue'), meta: { title: '库存', mobileTab: '/m/inventory', mobileParent: '/m', stage: 'S3', mobileList: true, mobileAsyncList: true } },
       { path: 'jobs', component: pending, meta: { title: '作业', mobileTab: '/m/jobs', mobileParent: '/m', stage: 'S4～S6' } },
       { path: 'records', component: () => import('./MobileReadList.vue'), meta: { title: '记录', mobileTab: '/m/records', mobileParent: '/m', stage: 'S3', mobileList: true, mobileAsyncList: true } },
+      { path: 'labels', component: () => import('./MobileLabels.vue'), meta: { title: '二维码标签', mobileParent: '/m/jobs', mobileTask: true } },
       { path: 'pending', component: () => import('./MobileReadList.vue'), meta: { title: '待上架记录', mobileTab: '/m/jobs', mobileParent: '/m/jobs', mobileList: true, mobileAsyncList: true } },
       { path: 'locations', component: () => import('./MobileReadList.vue'), meta: { title: '查找库位', mobileParent: '/m/inventory', mobileList: true, mobileAsyncList: true } },
       { path: 'read/:kind(batch|finished|receipt|document|count)/:id([1-9]\\d{0,9})', component: () => import('./MobileReadDetail.vue'), meta: { title: '查询详情', mobileParent: '/m/inventory', mobileReadDetail: true } },
@@ -51,10 +52,11 @@ export const mobileRoutes = [
       { path: 'account/password', component: () => import('./MobilePassword.vue'), meta: { title: '修改密码', mobileParent: '/m/account', mobileTask: true } },
       { path: 'state-lab', component: () => import('./MobileStateLab.vue'), meta: { title: 'S2 状态演练', mobileParent: '/m/jobs', mobileList: true, mobileTask: true } },
       { path: 'state-lab/:jobId([\\w-]{1,80})/:step(form|confirm|result|context)', component: () => import('./MobileTaskLab.vue'), meta: { title: 'S2 演练作业', mobileParent: '/m/state-lab', mobileTask: true, mobileLabTask: true } },
+      { path: 'jobs/inbound', component: pending, meta: { title: '入库', mobileParent: '/m/jobs', mobileTask: true, stage: 'S4 / S5' } },
       { path: 'jobs/receipt', component: () => import('./MobileReceipt.vue'), meta: { title: '原料入库', mobileParent: '/m/jobs', mobileTask: true, mobileReceiptTask: true } },
       { path: 'jobs/receipt/:jobId([\\w-]{1,80})/:step(form|confirm|result|choose)', component: () => import('./MobileReceipt.vue'), meta: { title: '原料入库', mobileParent: '/m/jobs', mobileTask: true, mobileReceiptTask: true } },
-      { path: 'jobs/putaway', component: () => import('./MobilePutaway.vue'), meta: { title: '原料手动上架', mobileParent: '/m/jobs', mobileTask: true, mobilePutawayTask: true } },
-      { path: 'jobs/putaway/:jobId([\\w-]{1,80})/:step(form|confirm|result|choose)', component: () => import('./MobilePutaway.vue'), meta: { title: '原料手动上架', mobileParent: '/m/jobs', mobileTask: true, mobilePutawayTask: true } },
+      { path: 'jobs/putaway', component: () => import('./MobilePutaway.vue'), meta: { title: '原料上架', mobileParent: '/m/jobs', mobileTask: true, mobilePutawayTask: true } },
+      { path: 'jobs/putaway/:jobId([\\w-]{1,80})/:step(form|confirm|result|choose|scan)', component: () => import('./MobilePutaway.vue'), meta: { title: '原料上架', mobileParent: '/m/jobs', mobileTask: true, mobilePutawayTask: true } },
       ...stockKinds.flatMap(kind => [
         { path: `jobs/${kind}`, component: () => import('./MobileStockJob.vue'), meta: { title: stockLabels[kind], stockKind: kind, mobileParent: '/m/jobs', mobileTask: true, mobileStockTask: true } },
         { path: `jobs/${kind}/:jobId([\\w-]{1,80})/:step(form|confirm|result|choose)`, component: () => import('./MobileStockJob.vue'), meta: { title: stockLabels[kind], stockKind: kind, mobileParent: '/m/jobs', mobileTask: true, mobileStockTask: true } },

@@ -13,6 +13,7 @@ import { putawayTaskPath } from './putaway'
 import { stockKinds, stockPath, stockLabels } from './stockJobs'
 import { locationKinds, locationPath, locationLabels } from './locationJobs'
 import './mobile.css'
+import './mobile-refresh.css'
 const route = useRoute(), router = useRouter(), viewport = ref({ inset: 0, keyboard: false }), recovery = ref('')
 const parent = computed(() => {
   mobileRevision.value

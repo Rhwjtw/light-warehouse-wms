@@ -33,7 +33,7 @@ export function verifyReceipt(task, row) {
 }
 export function receiptOrigin(value) {
   if (typeof value !== 'string' || value.includes('\\')) return '/m/jobs'
-  try { const u = new URL(value, 'https://wms.invalid'); return u.origin === 'https://wms.invalid' && ['/m', '/m/jobs', '/m/pending', '/m/records'].includes(u.pathname) ? u.pathname + u.search : '/m/jobs' } catch { return '/m/jobs' }
+  try { const u = new URL(value, 'https://wms.invalid'); return u.origin === 'https://wms.invalid' && ['/m', '/m/jobs', '/m/jobs/inbound', '/m/pending', '/m/records'].includes(u.pathname) ? u.pathname + u.search : '/m/jobs' } catch { return '/m/jobs' }
 }
 export function receiptTaskPath(task, step = 'form') { return `/m/jobs/receipt/${task.id}/${step}` }
 

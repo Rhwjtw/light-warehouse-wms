@@ -1,9 +1,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { auth } from '../auth'
+import { canOperate } from '../permissions'
 import { api } from '../api'
 import MobileReadFields from './MobileReadFields.vue'
 import { readGate, safeReadOrigin, scopeLabel } from './readQueries'
+const materialWrite = computed(() => canOperate(auth.user?.role, 'material.inventory.write'))
 const route = useRoute(), detail = ref(null), batches = ref([]), archive = ref(null), archiveError = ref(''), loading = ref(false), error = ref(''), search = ref(''), gate = readGate()
 const relatedArchives = ref([])
 const origin = computed(() => safeReadOrigin(route.query.from, '/m/records'))
@@ -50,7 +53,7 @@ onMounted(() => window.addEventListener('wms-mobile-resume', load))
 onBeforeUnmount(() => { gate.cancel(); window.removeEventListener('wms-mobile-resume', load) })
 </script>
 <template>
-  <section class="mobile-card"><span class="mobile-pill">只读详情</span><p class="mobile-muted mobile-small">本页不记账。查询记录只能辅助核对，不能确定某个请求键的提交结果。</p><button class="mobile-button" :disabled="loading" @click="load">刷新详情</button></section>
+  <div class="mobile-section-heading"><span class="mobile-muted mobile-small">单据与库存详情</span><button class="mobile-link-button" :disabled="loading" @click="load">刷新</button></div><details class="mobile-more"><summary>核对说明</summary><p class="mobile-muted mobile-small">本页不记账。查询记录只能辅助核对，不能确定某个请求键的提交结果。</p></details>
   <p v-if="loading" class="mobile-status" role="status">正在读取详情…</p><section v-else-if="error" class="mobile-card"><p class="mobile-error" role="alert">读取失败：{{ error }}</p><button class="mobile-button primary" @click="load">重试详情</button></section>
   <template v-else-if="detail">
     <section class="mobile-card"><h2>{{ detail.material_name || detail.name || detail.document_no }}</h2><MobileReadFields :record="detail" /><p v-if="archive?.is_active === false" class="mobile-warning">原料档案已停用</p><p v-if="archiveError" class="mobile-warning">原料档案状态未核实：{{ archiveError }}</p><p v-for="related in relatedArchives" :key="related.label" :class="related.error || related.record?.is_active === false ? 'mobile-warning' : 'mobile-muted mobile-small'">{{ related.label }}{{ related.error ? '状态未核实：' + related.error : related.record.name + ' · ' + (related.record.is_active ? '启用' : '已停用') }}</p></section>
@@ -61,10 +64,10 @@ onBeforeUnmount(() => { gate.cancel(); window.removeEventListener('wms-mobile-re
     </template>
     <template v-if="route.params.kind === 'receipt'">
       <p class="mobile-warning">{{ detail.status === 'reversed' ? '本入库已冲销，不能继续上架。' : detail.status === 'shelved' ? '本记录已全部上架。' : '待上架量为当前查询值；进入作业后重新核实。' }}</p>
-      <router-link v-if="!['reversed', 'shelved'].includes(detail.status)" :to="{ path: '/m/jobs/putaway', query: { receipt_id: String(detail.id), movement_id: String(detail.receipt_movement_id), from: origin } }" class="mobile-button">手动上架此明细</router-link><section v-for="allocation in detail.allocations" :key="allocation.id" class="mobile-card"><h2>上架分配 {{ allocation.id }} {{ allocation.reversed_by_document_id ? '（已冲销）' : '' }}</h2><MobileReadFields :record="{ ...allocation, unit: detail.unit }" /><router-link :to="{ path: '/m/read/document/' + allocation.document_id, query: { from: origin } }" class="mobile-button">查看上架单据</router-link></section>
+      <router-link v-if="materialWrite && !['reversed', 'shelved'].includes(detail.status)" :to="{ path: '/m/jobs/putaway', query: { receipt_id: String(detail.id), movement_id: String(detail.receipt_movement_id), from: origin } }" class="mobile-button">手动上架此明细</router-link><section v-for="allocation in detail.allocations" :key="allocation.id" class="mobile-card"><h2>上架分配 {{ allocation.id }} {{ allocation.reversed_by_document_id ? '（已冲销）' : '' }}</h2><MobileReadFields :record="{ ...allocation, unit: detail.unit }" /><router-link :to="{ path: '/m/read/document/' + allocation.document_id, query: { from: origin } }" class="mobile-button">查看上架单据</router-link></section>
       <router-link :to="{ path: '/m/read/document/' + detail.id, query: { from: origin } }" class="mobile-button">查看原入库单据与流水</router-link>
     </template>
-    <template v-if="route.params.kind === 'batch'"><router-link :to="{ path: '/m/jobs/material-transfer', query: { batch_id: String(detail.id), from: origin } }" class="mobile-button">移库此库位批次</router-link><router-link :to="{ path: '/m/jobs/material-count', query: { batch_id: String(detail.id), from: origin } }" class="mobile-button">盘点此库位批次</router-link><router-link :to="{ path: '/m/records', query: { view: 'material', batch_id: String(detail.id) } }" class="mobile-button">查看本批次全部流水</router-link><p class="mobile-muted mobile-small">批次 ID 区分库位及供应商；累计入库保持历史口径，不能当作本次入库量。</p></template>
+    <template v-if="route.params.kind === 'batch'"><router-link v-if="materialWrite" :to="{ path: '/m/jobs/material-transfer', query: { batch_id: String(detail.id), from: origin } }" class="mobile-button">移库此库位批次</router-link><router-link v-if="materialWrite" :to="{ path: '/m/jobs/material-count', query: { batch_id: String(detail.id), from: origin } }" class="mobile-button">盘点此库位批次</router-link><router-link :to="{ path: '/m/records', query: { view: 'material', batch_id: String(detail.id) } }" class="mobile-button">查看本批次全部流水</router-link><p class="mobile-muted mobile-small">批次 ID 区分库位及供应商；累计入库保持历史口径，不能当作本次入库量。</p></template>
     <template v-if="['document', 'count'].includes(route.params.kind)">
       <section v-if="detail.original || detail.reversal" class="mobile-card"><h2>关联单据</h2><router-link v-for="linked in [detail.original, detail.reversal].filter(Boolean)" :key="linked.id" :to="{ path: '/m/read/document/' + linked.id, query: { from: origin } }" class="mobile-button">{{ linked.document_no }}</router-link><p v-if="detail.reversal?.reason">冲销原因 {{ detail.reversal.reason }}</p></section>
       <section v-for="transaction in detail.transactions" :key="transaction.id" class="mobile-card"><h2>流水 {{ transaction.id }}</h2><MobileReadFields :record="transaction" /></section><p v-if="!detail.transactions?.length" class="mobile-muted">本单无库存变动流水；零差盘点仍保留盘点事实。</p>

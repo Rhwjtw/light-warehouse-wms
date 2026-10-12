@@ -7,7 +7,7 @@ export const stockPath = (task, step = 'form') => `/m/jobs/${task.kind}/${task.i
 export const stockRecord = (kind, fields) => kind === 'material-outbound' ? `${fields.itemId}:${fields.batchId}` : fields.itemId
 export function stockOrigin(value) {
   if (typeof value !== 'string' || value.includes('\\') || /[\u0000-\u001f]/.test(value)) return '/m/jobs'
-  try { const u = new URL(value, 'https://wms.invalid'); return u.origin === 'https://wms.invalid' && ['/m', '/m/jobs'].includes(u.pathname) ? u.pathname + u.search : safeReadOrigin(value, '/m/jobs') } catch { return '/m/jobs' }
+  try { const u = new URL(value, 'https://wms.invalid'); return u.origin === 'https://wms.invalid' && ['/m', '/m/jobs', '/m/jobs/inbound', '/m/jobs/outbound'].includes(u.pathname) ? u.pathname + u.search : safeReadOrigin(value, '/m/jobs') } catch { return '/m/jobs' }
 }
 const limits = { itemId: 10, batchId: 10, locationId: 10, unit: 16, quantity: 80, businessDate: 10, referenceNo: 120, notes: 2000 }
 const id = value => /^[1-9]\d{0,9}$/.test(String(value))
