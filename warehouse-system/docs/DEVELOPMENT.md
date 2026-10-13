@@ -58,12 +58,8 @@ npm.cmd run build -- --outDir ../.runtime/frontend-preview
 
 ## 源码部署
 
+完整步骤见[本地部署教程](INSTALL.md)，包括环境准备、专用数据库初始化、管理员创建、前端构建、启动停止及备份。本仓库仅提供源码和教程，不提供安装包。
+
 后端可以同时提供前端构建资源和 `/api` 接口。配置项见 `backend/.env.production.example` 与 `frontend/.env.production.example`；服务启动、停止和数据库备份工具位于应用根目录。
 
 服务端按账号角色检查权限，浏览器页面通过同一服务入口访问。手机页面使用 `/m`，相机功能需要 HTTPS。
-
-## Windows 安装工具
-
-`packaging/windows/` 包含安装器构建脚本、运行控制程序和版本兼容清单。构建需要 Inno Setup、微软运行库及相应运行组件；具体参数以脚本为准。
-
-版本清单和文件校验值用于限定安装内容、核对兼容性。修改安装版本时一并核对源码组合、校验清单与已有数据的升级路径。
