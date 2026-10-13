@@ -29,3 +29,12 @@ backups/
 htmlcov/
 playwright-report/
 test-results/
+
+# Keep internal records and evidence local
+docs/*
+!docs/INSTALL.md
+!docs/DEVELOPMENT.md
+!docs/recovery/
+docs/recovery/*
+!docs/recovery/*.py
+!docs/recovery/*.ps1
